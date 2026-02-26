@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ### --- FILL THESE IN BEFORE LAUNCH --- ###
-GIT_REPO="https://github.com/sheric98/minesweeper-web-server.git"
+GIT_REPO="https://github.com/sheric98/minesweeper-versus-server.git"
 DOMAIN="api.minesweeper-versus.com"
 JWT_SECRET="<generate-with: python3 -c 'import secrets;print(secrets.token_hex(32))'>"
 CORS_ORIGINS="https://minesweeper-versus.com"
