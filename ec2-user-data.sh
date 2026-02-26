@@ -26,7 +26,7 @@ chmod 600 /home/ubuntu/.env.minesweeper
 cd /home/ubuntu
 git clone "$GIT_REPO" minesweeper-web-server
 chown -R ubuntu:ubuntu minesweeper-web-server
-sudo -u ubuntu -E ./minesweeper-web-server/.deploy.sh
+./minesweeper-web-server/.deploy.sh
 
 # Nginx config
 cat > /etc/nginx/sites-available/$DOMAIN <<'NGINX'
