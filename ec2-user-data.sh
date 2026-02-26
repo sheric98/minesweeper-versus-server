@@ -26,15 +26,7 @@ chmod 600 /home/ubuntu/.env.minesweeper
 cd /home/ubuntu
 git clone "$GIT_REPO" minesweeper-web-server
 chown -R ubuntu:ubuntu minesweeper-web-server
-cd minesweeper-web-server
-docker build -t minesweeper-backend .
-docker run -d \
-  --name minesweeper-backend \
-  --restart unless-stopped \
-  -p 5000:5000 \
-  -e JWT_SECRET="$JWT_SECRET" \
-  -e CORS_ORIGINS="$CORS_ORIGINS" \
-  minesweeper-backend
+sudo -u ubuntu -E ./minesweeper-web-server/.deploy.sh
 
 # Nginx config
 cat > /etc/nginx/sites-available/$DOMAIN <<'NGINX'
