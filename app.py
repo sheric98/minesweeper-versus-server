@@ -1,0 +1,25 @@
+from flask import Flask
+from flask_cors import CORS
+from config import CORS_ORIGINS
+
+
+def create_app():
+    app = Flask(__name__)
+    CORS(app, origins=CORS_ORIGINS)
+
+    from auth import auth_bp
+    from ws_ticket import ws_ticket_bp
+    from matchmaking import matchmaking_bp
+    from websocket_handler import sock
+
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(ws_ticket_bp)
+    app.register_blueprint(matchmaking_bp)
+    sock.init_app(app)
+
+    return app
+
+
+if __name__ == "__main__":
+    app = create_app()
+    app.run(host="0.0.0.0", port=5000, debug=True)
