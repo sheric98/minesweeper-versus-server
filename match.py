@@ -19,6 +19,8 @@ class Match:
         self.start_time = None
         self.finished = False
         self.revealed_counts: dict[str, int] = {player1: 0, player2: 0}
+        self.rematch_requests: set[str] = set()
+        self.rematch_declined: bool = False
         self._lock = threading.Lock()
 
     def add_connection(self, username: str, ws):
@@ -56,8 +58,29 @@ class Match:
         self.start_time = time.time()
         self._broadcast({"type": "game_start", "board": encoded})
 
+    def _reset_for_rematch(self):
+        """Reset match state for a new game. Connections stay intact."""
+        self.board = None
+        self.starting_square = None
+        self.start_time = None
+        self.finished = False
+        self.revealed_counts = {self.player1: 0, self.player2: 0}
+        self.rematch_requests = set()
+        self.rematch_declined = False
+
     def handle_message(self, username: str, msg: dict):
         """Route a client message to the opponent."""
+        msg_type = msg.get("type")
+
+        # Rematch messages work when finished
+        if msg_type == "rematch_request":
+            self._handle_rematch_request(username)
+            return
+        if msg_type == "rematch_decline":
+            self._handle_rematch_decline(username)
+            return
+
+        # Gameplay messages are ignored when finished
         if self.finished:
             return
 
@@ -65,8 +88,6 @@ class Match:
         opponent_ws = self.connections.get(opponent)
         if not opponent_ws:
             return
-
-        msg_type = msg.get("type")
 
         if msg_type in ("reveal", "chord"):
             result_cells = msg.get("resultCells", [])
@@ -88,6 +109,36 @@ class Match:
         elif msg_type == "game_complete":
             self._handle_completion(username, msg)
 
+    def _handle_rematch_request(self, username: str):
+        with self._lock:
+            if not self.finished:
+                return
+            if self.rematch_declined:
+                return
+            self.rematch_requests.add(username)
+            both_requested = len(self.rematch_requests) == 2
+
+        if both_requested:
+            self._broadcast({"type": "rematch_accepted"})
+            self._reset_for_rematch()
+            threading.Thread(target=self._run_match, daemon=True).start()
+        else:
+            opponent = self.player2 if username == self.player1 else self.player1
+            opponent_ws = self.connections.get(opponent)
+            if opponent_ws:
+                self._send(opponent_ws, {"type": "rematch_requested", "by": username})
+
+    def _handle_rematch_decline(self, username: str):
+        with self._lock:
+            if not self.finished:
+                return
+            self.rematch_declined = True
+
+        opponent = self.player2 if username == self.player1 else self.player1
+        opponent_ws = self.connections.get(opponent)
+        if opponent_ws:
+            self._send(opponent_ws, {"type": "rematch_declined"})
+
     def _handle_completion(self, username: str, msg: dict):
         with self._lock:
             if self.finished:
@@ -107,19 +158,23 @@ class Match:
                 "opponentTimeMs": msg.get("timeMs", 0) if uname != username else 0,
             })
 
-        tracker.set_online(self.player1)
-        tracker.set_online(self.player2)
-
     def handle_disconnect(self, username: str):
-        with self._lock:
-            if self.finished:
-                return
-            self.finished = True
-
         opponent = self.player2 if username == self.player1 else self.player1
         opponent_ws = self.connections.get(opponent)
-        if opponent_ws:
-            self._send(opponent_ws, {"type": "opponent_disconnected"})
+
+        with self._lock:
+            was_finished = self.finished
+            self.finished = True
+
+        if was_finished:
+            # Post-game disconnect: notify opponent rematch is off
+            if opponent_ws:
+                self._send(opponent_ws, {"type": "rematch_declined"})
+                self._send(opponent_ws, {"type": "opponent_disconnected"})
+        else:
+            # Mid-game disconnect: opponent wins
+            if opponent_ws:
+                self._send(opponent_ws, {"type": "opponent_disconnected"})
 
         tracker.set_online(self.player1)
         tracker.set_online(self.player2)
