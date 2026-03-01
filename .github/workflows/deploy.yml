@@ -15,5 +15,5 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            cd ~/minesweeper-versus-server
+            cd ~/minesweeper-web-server
             sudo ./redeploy.sh
