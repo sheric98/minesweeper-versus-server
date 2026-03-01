@@ -45,6 +45,13 @@ class InviteStore:
                 inv["status"] = "rejected"
             return dict(inv)
 
+    def cancel_pending_for_user(self, username: str):
+        """Cancel all pending invites where the user is sender or receiver."""
+        with self._lock:
+            for inv in self._invites.values():
+                if inv["status"] == "pending" and (inv["from"] == username or inv["to"] == username):
+                    inv["status"] = "cancelled"
+
     def get_for_user(self, username: str) -> dict:
         """Returns {sent: [...], received: [...]} invites relevant to the user.
 

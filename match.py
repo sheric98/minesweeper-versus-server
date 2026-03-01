@@ -49,6 +49,10 @@ class Match:
         tracker.set_in_game(self.player1, self.match_id)
         tracker.set_in_game(self.player2, self.match_id)
 
+        from matchmaking import invite_store
+        invite_store.cancel_pending_for_user(self.player1)
+        invite_store.cancel_pending_for_user(self.player2)
+
         # Countdown
         for i in range(COUNTDOWN_SECONDS, 0, -1):
             time.sleep(1)
