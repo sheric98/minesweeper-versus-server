@@ -45,6 +45,14 @@ class InviteStore:
                 inv["status"] = "rejected"
             return dict(inv)
 
+    def find_pending_between(self, from_user: str, to_user: str) -> str | None:
+        """Find a pending invite from from_user to to_user. Returns invite_id or None."""
+        with self._lock:
+            for inv_id, inv in self._invites.items():
+                if inv["from"] == from_user and inv["to"] == to_user and inv["status"] == "pending":
+                    return inv_id
+            return None
+
     def cancel_pending_for_user(self, username: str):
         """Cancel all pending invites where the user is sender or receiver."""
         with self._lock:
@@ -96,6 +104,15 @@ def send_invite():
         return jsonify({"error": "Cannot invite yourself"}), 400
     if not tracker.is_active(target):
         return jsonify({"error": "Player not online"}), 404
+
+    # Check for a reverse pending invite (target already invited us)
+    reverse_invite_id = invite_store.find_pending_between(target, g.username)
+    if reverse_invite_id:
+        result = invite_store.respond(reverse_invite_id, True)
+        if result and result["match_id"]:
+            from match import match_manager
+            match_manager.create_match(result["match_id"], result["from"], result["to"])
+            return jsonify({"matchId": result["match_id"]})
 
     invite_id = invite_store.create(g.username, target)
     return jsonify({"inviteId": invite_id})
