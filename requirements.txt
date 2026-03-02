@@ -5,3 +5,4 @@ PyJWT>=2.8
 gunicorn>=22.0
 python-dotenv>=1.0
 gevent>=24.2
+psycopg2-binary>=2.9

@@ -3,12 +3,16 @@ load_dotenv()
 
 from flask import Flask
 from flask_cors import CORS
-from config import CORS_ORIGINS
+from config import CORS_ORIGINS, DATABASE_URL
 
 
 def create_app():
     app = Flask(__name__)
     CORS(app, origins=CORS_ORIGINS)
+
+    if DATABASE_URL:
+        from db import init_db
+        init_db()
 
     from auth import auth_bp
     from ws_ticket import ws_ticket_bp
