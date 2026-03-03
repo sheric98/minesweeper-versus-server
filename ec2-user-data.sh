@@ -6,11 +6,12 @@ GIT_REPO="https://github.com/sheric98/minesweeper-versus-server.git"
 DOMAIN="api.minesweeper-versus.com"
 export JWT_SECRET="<generate-with: python3 -c 'import secrets;print(secrets.token_hex(32))'>"
 export CORS_ORIGINS="https://minesweeper-versus.com"
+export POSTGRES_PASSWORD="<generate-with: python3 -c 'import secrets;print(secrets.token_hex(32))'>"
 CERTBOT_EMAIL="<your-email>"
 ### ----------------------------------- ###
 
 apt-get update && apt-get upgrade -y
-apt-get install -y docker.io nginx certbot python3-certbot-nginx git
+apt-get install -y docker.io docker-compose-v2 nginx certbot python3-certbot-nginx git
 
 systemctl enable docker && systemctl start docker
 
@@ -18,6 +19,8 @@ systemctl enable docker && systemctl start docker
 cat > /home/ubuntu/.env.minesweeper <<EOF
 JWT_SECRET=$JWT_SECRET
 CORS_ORIGINS=$CORS_ORIGINS
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+DATABASE_URL=postgresql://minesweeper:${POSTGRES_PASSWORD}@db:5432/minesweeper
 EOF
 chown ubuntu:ubuntu /home/ubuntu/.env.minesweeper
 chmod 600 /home/ubuntu/.env.minesweeper
