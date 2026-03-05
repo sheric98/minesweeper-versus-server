@@ -27,6 +27,14 @@ def init_db():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     UNIQUE(provider, provider_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS leaderboard_scores (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES users(id),
+                    time_seconds INTEGER NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_leaderboard_time ON leaderboard_scores (time_seconds ASC);
             """)
         conn.commit()
     finally:

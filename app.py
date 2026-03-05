@@ -17,11 +17,13 @@ def create_app():
     from auth import auth_bp
     from ws_ticket import ws_ticket_bp
     from matchmaking import matchmaking_bp
+    from leaderboard import leaderboard_bp
     from websocket_handler import sock
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(ws_ticket_bp)
     app.register_blueprint(matchmaking_bp)
+    app.register_blueprint(leaderboard_bp)
     sock.init_app(app)
 
     return app
