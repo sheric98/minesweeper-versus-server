@@ -20,10 +20,12 @@ def ws_handler(ws):
         return
 
     # Validate ticket (single-use, not expired)
-    username = ticket_store.consume(ticket)
-    if not username:
+    ticket_data = ticket_store.consume(ticket)
+    if not ticket_data:
         ws.close(4001, "Invalid or expired ticket")
         return
+    username = ticket_data["username"]
+    user_id = ticket_data["user_id"]
 
     # Find match
     match = match_manager.get_match(match_id)
@@ -37,7 +39,7 @@ def ws_handler(ws):
         return
 
     # Register connection (triggers match start when both connected)
-    match.add_connection(username, ws)
+    match.add_connection(username, ws, user_id=user_id)
 
     try:
         while True:

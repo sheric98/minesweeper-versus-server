@@ -16,24 +16,25 @@ class TicketStore:
         # ticket_str -> {"username": str, "created_at": float}
         self._tickets: dict[str, dict] = {}
 
-    def create(self, username: str) -> str:
+    def create(self, username: str, user_id: str | None = None) -> str:
         ticket = str(uuid.uuid4())
         with self._lock:
             self._tickets[ticket] = {
                 "username": username,
+                "user_id": user_id,
                 "created_at": time.time(),
             }
         return ticket
 
-    def consume(self, ticket: str) -> str | None:
-        """Returns username if ticket is valid and not expired. Single-use: removes on consume."""
+    def consume(self, ticket: str) -> dict | None:
+        """Returns {"username": str, "user_id": str|None} if valid. Single-use: removes on consume."""
         with self._lock:
             t = self._tickets.pop(ticket, None)
             if not t:
                 return None
             if (time.time() - t["created_at"]) > TICKET_EXPIRY_SECONDS:
                 return None
-            return t["username"]
+            return {"username": t["username"], "user_id": t.get("user_id")}
 
     def cleanup_expired(self):
         now = time.time()
@@ -50,5 +51,5 @@ ticket_store = TicketStore()
 @ws_ticket_bp.route("/ws/ticket", methods=["POST"])
 @require_auth
 def create_ticket():
-    ticket = ticket_store.create(g.username)
+    ticket = ticket_store.create(g.username, user_id=g.user_id)
     return jsonify({"ticket": ticket})

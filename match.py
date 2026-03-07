@@ -5,7 +5,7 @@ import time
 from board_generator import generate_solvable_board
 from board_encoder import encode_board
 from session_tracker import tracker
-from config import COUNTDOWN_SECONDS
+from config import COUNTDOWN_SECONDS, DATABASE_URL
 
 
 class Match:
@@ -14,6 +14,7 @@ class Match:
         self.player1 = player1
         self.player2 = player2
         self.connections: dict[str, object] = {}  # username -> websocket
+        self.user_ids: dict[str, str | None] = {}  # username -> user_id
         self.board = None
         self.starting_square = None
         self.start_time = None
@@ -23,9 +24,10 @@ class Match:
         self.rematch_declined: bool = False
         self._lock = threading.Lock()
 
-    def add_connection(self, username: str, ws):
+    def add_connection(self, username: str, ws, user_id: str | None = None):
         with self._lock:
             self.connections[username] = ws
+            self.user_ids[username] = user_id
             both_connected = len(self.connections) == 2
 
         if both_connected:
@@ -161,6 +163,42 @@ class Match:
                 "yourTimeMs": msg.get("timeMs", 0) if uname == username else 0,
                 "opponentTimeMs": msg.get("timeMs", 0) if uname != username else 0,
             })
+
+        # Record head-to-head result if both players are Google-authenticated
+        self._record_h2h_result(winner)
+
+    def _record_h2h_result(self, winner: str):
+        if not DATABASE_URL:
+            return
+        winner_id = self.user_ids.get(winner)
+        loser = self.player2 if winner == self.player1 else self.player1
+        loser_id = self.user_ids.get(loser)
+        if not winner_id or not loser_id:
+            return
+        # Canonical ordering: player1_id < player2_id
+        if winner_id < loser_id:
+            p1_id, p2_id = winner_id, loser_id
+            win_col = "player1_wins"
+        else:
+            p1_id, p2_id = loser_id, winner_id
+            win_col = "player2_wins"
+        try:
+            from db import get_conn
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        INSERT INTO head_to_head_records (player1_id, player2_id, {win_col})
+                        VALUES (%s, %s, 1)
+                        ON CONFLICT (player1_id, player2_id)
+                        DO UPDATE SET {win_col} = head_to_head_records.{win_col} + 1,
+                                      updated_at = now()
+                    """, (p1_id, p2_id))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
 
     def handle_disconnect(self, username: str):
         opponent = self.player2 if username == self.player1 else self.player1
