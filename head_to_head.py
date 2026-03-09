@@ -22,7 +22,10 @@ def get_head_to_head():
             if opponent_name:
                 return _get_single_record(cur, g.user_id, opponent_name)
             else:
-                return _get_all_records(cur, g.user_id)
+                page = max(1, request.args.get("page", 1, type=int))
+                page_size = max(1, min(request.args.get("page_size", 10, type=int), 50))
+                search = request.args.get("search", "", type=str).strip()
+                return _get_all_records(cur, g.user_id, page, page_size, search)
     finally:
         conn.close()
 
@@ -57,21 +60,41 @@ def _get_single_record(cur, user_id, opponent_name):
     return jsonify({"wins": wins, "losses": losses, "opponent": opponent_name})
 
 
-def _get_all_records(cur, user_id):
+def _get_all_records(cur, user_id, page, page_size, search):
+    base_query = """
+        FROM head_to_head_records h
+        JOIN users u1 ON u1.id = h.player1_id
+        JOIN users u2 ON u2.id = h.player2_id
+        WHERE (h.player1_id = %s OR h.player2_id = %s)
+    """
+    params = [user_id, user_id]
+
+    if search:
+        base_query += " AND CASE WHEN h.player1_id = %s THEN u2.display_name ELSE u1.display_name END ILIKE %s"
+        params.extend([user_id, f"%{search}%"])
+
+    cur.execute("SELECT COUNT(*) " + base_query, params)
+    total_records = cur.fetchone()[0]
+
+    offset = (page - 1) * page_size
     cur.execute("""
         SELECT
             CASE WHEN h.player1_id = %s THEN u2.display_name ELSE u1.display_name END AS opponent,
             CASE WHEN h.player1_id = %s THEN h.player1_wins ELSE h.player2_wins END AS wins,
-            CASE WHEN h.player1_id = %s THEN h.player2_wins ELSE h.player1_wins END AS losses
-        FROM head_to_head_records h
-        JOIN users u1 ON u1.id = h.player1_id
-        JOIN users u2 ON u2.id = h.player2_id
-        WHERE h.player1_id = %s OR h.player2_id = %s
-        ORDER BY h.updated_at DESC
-    """, (user_id, user_id, user_id, user_id, user_id))
+            CASE WHEN h.player1_id = %s THEN h.player2_wins ELSE h.player1_wins END AS losses,
+            (h.player1_wins + h.player2_wins) AS total_games
+    """ + base_query + """
+        ORDER BY total_games DESC
+        LIMIT %s OFFSET %s
+    """, [user_id, user_id, user_id] + params + [page_size, offset])
 
     records = [
-        {"opponent": row[0], "wins": row[1], "losses": row[2]}
+        {"opponent": row[0], "wins": row[1], "losses": row[2], "total_games": row[3]}
         for row in cur.fetchall()
     ]
-    return jsonify({"records": records})
+    return jsonify({
+        "records": records,
+        "page": page,
+        "page_size": page_size,
+        "total_records": total_records,
+    })
