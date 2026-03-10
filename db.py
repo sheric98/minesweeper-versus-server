@@ -32,9 +32,15 @@ def init_db():
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     user_id UUID NOT NULL REFERENCES users(id),
                     time_seconds INTEGER NOT NULL,
+                    mode VARCHAR(10) NOT NULL DEFAULT 'random',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 CREATE INDEX IF NOT EXISTS idx_leaderboard_time ON leaderboard_scores (time_seconds ASC);
+                -- TODO: Remove after production leaderboard_scores table has been altered
+                ALTER TABLE leaderboard_scores
+                ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'random';
+
+                CREATE INDEX IF NOT EXISTS idx_leaderboard_mode_time ON leaderboard_scores (mode, time_seconds ASC);
 
                 CREATE TABLE IF NOT EXISTS head_to_head_records (
                     player1_id UUID NOT NULL REFERENCES users(id),

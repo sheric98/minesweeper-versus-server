@@ -13,6 +13,9 @@ def get_leaderboard():
 
     limit = request.args.get("limit", 10, type=int)
     limit = max(1, min(limit, 50))
+    mode = request.args.get("mode", "random")
+    if mode not in ("random", "no-guess"):
+        mode = "random"
 
     from db import get_conn
     conn = get_conn()
@@ -22,9 +25,10 @@ def get_leaderboard():
                 "SELECT u.display_name, ls.time_seconds, ls.created_at "
                 "FROM leaderboard_scores ls "
                 "JOIN users u ON u.id = ls.user_id "
+                "WHERE ls.mode = %s "
                 "ORDER BY ls.time_seconds ASC "
                 "LIMIT %s",
-                (limit,)
+                (mode, limit)
             )
             rows = cur.fetchall()
         scores = [
@@ -55,13 +59,17 @@ def post_score():
     if not isinstance(time_seconds, int) or time_seconds < 1 or time_seconds > 999:
         return jsonify({"error": "time_seconds must be an integer between 1 and 999"}), 400
 
+    mode = body.get("mode", "random")
+    if mode not in ("random", "no-guess"):
+        mode = "random"
+
     from db import get_conn
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO leaderboard_scores (user_id, time_seconds) VALUES (%s, %s)",
-                (g.user_id, time_seconds)
+                "INSERT INTO leaderboard_scores (user_id, time_seconds, mode) VALUES (%s, %s, %s)",
+                (g.user_id, time_seconds, mode)
             )
         conn.commit()
         return jsonify({"success": True})
