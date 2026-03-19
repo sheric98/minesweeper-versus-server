@@ -17,19 +17,35 @@ def get_leaderboard():
     if mode not in ("random", "no-guess"):
         mode = "random"
 
+    difficulty = request.args.get("difficulty")
+    valid_difficulties = ("beginner", "intermediate", "advanced", "expert")
+
     from db import get_conn
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT u.display_name, ls.time_seconds, ls.created_at "
-                "FROM leaderboard_scores ls "
-                "JOIN users u ON u.id = ls.user_id "
-                "WHERE ls.mode = %s "
-                "ORDER BY ls.time_seconds ASC "
-                "LIMIT %s",
-                (mode, limit)
-            )
+            if mode == "no-guess":
+                if difficulty not in valid_difficulties:
+                    difficulty = "expert"
+                cur.execute(
+                    "SELECT u.display_name, ls.time_seconds, ls.created_at "
+                    "FROM leaderboard_scores ls "
+                    "JOIN users u ON u.id = ls.user_id "
+                    "WHERE ls.mode = %s AND ls.difficulty = %s "
+                    "ORDER BY ls.time_seconds ASC "
+                    "LIMIT %s",
+                    (mode, difficulty, limit)
+                )
+            else:
+                cur.execute(
+                    "SELECT u.display_name, ls.time_seconds, ls.created_at "
+                    "FROM leaderboard_scores ls "
+                    "JOIN users u ON u.id = ls.user_id "
+                    "WHERE ls.mode = %s "
+                    "ORDER BY ls.time_seconds ASC "
+                    "LIMIT %s",
+                    (mode, limit)
+                )
             rows = cur.fetchall()
         scores = [
             {
@@ -63,13 +79,20 @@ def post_score():
     if mode not in ("random", "no-guess"):
         mode = "random"
 
+    valid_difficulties = ("beginner", "intermediate", "advanced", "expert")
+    difficulty = None
+    if mode == "no-guess":
+        difficulty = body.get("difficulty")
+        if difficulty not in valid_difficulties:
+            return jsonify({"error": "difficulty must be one of: beginner, intermediate, advanced, expert"}), 400
+
     from db import get_conn
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO leaderboard_scores (user_id, time_seconds, mode) VALUES (%s, %s, %s)",
-                (g.user_id, time_seconds, mode)
+                "INSERT INTO leaderboard_scores (user_id, time_seconds, mode, difficulty) VALUES (%s, %s, %s, %s)",
+                (g.user_id, time_seconds, mode, difficulty)
             )
         conn.commit()
         return jsonify({"success": True})

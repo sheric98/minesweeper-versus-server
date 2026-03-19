@@ -42,6 +42,15 @@ def init_db():
 
                 CREATE INDEX IF NOT EXISTS idx_leaderboard_mode_time ON leaderboard_scores (mode, time_seconds ASC);
 
+                -- Add difficulty column for no-guess mode
+                ALTER TABLE leaderboard_scores
+                ADD COLUMN IF NOT EXISTS difficulty VARCHAR(15) DEFAULT NULL;
+
+                -- Backfill existing no-guess rows as expert
+                UPDATE leaderboard_scores SET difficulty = 'expert' WHERE mode = 'no-guess' AND difficulty IS NULL;
+
+                CREATE INDEX IF NOT EXISTS idx_leaderboard_mode_difficulty_time ON leaderboard_scores (mode, difficulty, time_seconds ASC);
+
                 CREATE TABLE IF NOT EXISTS head_to_head_records (
                     player1_id UUID NOT NULL REFERENCES users(id),
                     player2_id UUID NOT NULL REFERENCES users(id),
