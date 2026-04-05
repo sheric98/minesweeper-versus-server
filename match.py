@@ -1,11 +1,12 @@
 import json
+import random
 import threading
 import time
 
 from board_generator import generate_solvable_board
 from board_encoder import encode_board
 from session_tracker import tracker
-from config import COUNTDOWN_SECONDS, DATABASE_URL
+from config import COUNTDOWN_SECONDS, DATABASE_URL, ROWS, COLS
 
 
 class Match:
@@ -35,7 +36,11 @@ class Match:
 
     def _run_match(self):
         """Run the match lifecycle in a background thread."""
-        self.board, self.starting_square = generate_solvable_board()
+        start_row = random.randrange(ROWS)
+        start_col = random.randrange(COLS)
+        self.board, self.starting_square = generate_solvable_board(
+            start_row, start_col, difficulty="expert"
+        )
         encoded = encode_board(self.board, self.match_id)
 
         # Send match_found to both
