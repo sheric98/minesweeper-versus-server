@@ -1,8 +1,19 @@
 import random
+import time
 from collections import deque
+from typing import Callable, Optional
 
 from config import ROWS, COLS, MINE_COUNT
-from solver import is_solvable
+from solver import (
+    BasicSolver,
+    PerfectSolver,
+    ProbabilisticSolver,
+    Solver,
+    SubsetSolver,
+)
+
+
+Difficulty = str  # "beginner" | "intermediate" | "advanced" | "expert"
 
 
 def _compute_adjacency(board: list[list[dict]]):
@@ -21,57 +32,18 @@ def _compute_adjacency(board: list[list[dict]]):
             board[r][c]["adjacentMines"] = count
 
 
-def _find_zero_cells(board: list[list[dict]]) -> list[tuple[int, int]]:
-    """Find all cells with adjacentMines == 0 and not a mine (valid starting squares)."""
-    return [
-        (r, c)
-        for r in range(ROWS)
-        for c in range(COLS)
-        if not board[r][c]["isMine"] and board[r][c]["adjacentMines"] == 0
+def _generate_random_board(start_row: int, start_col: int) -> list[list[dict]]:
+    """Place mines randomly, excluding the 3x3 safe zone around the start."""
+    safe_zone: set[tuple[int, int]] = set()
+    for dr in range(-1, 2):
+        for dc in range(-1, 2):
+            nr, nc = start_row + dr, start_col + dc
+            if 0 <= nr < ROWS and 0 <= nc < COLS:
+                safe_zone.add((nr, nc))
+
+    all_positions = [
+        (r, c) for r in range(ROWS) for c in range(COLS) if (r, c) not in safe_zone
     ]
-
-
-def _unique_starting_regions(board: list[list[dict]], zero_cells: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """Return one representative zero cell per connected flood-fill region.
-
-    Zero cells in the same region reveal the same initial area, so
-    we only need to test solvability once per region.
-    """
-    visited = set()
-    representatives = []
-
-    for r, c in zero_cells:
-        if (r, c) in visited:
-            continue
-        # TODO: randomize representative chosen from this region instead of always picking the first one found
-        representatives.append((r, c))
-        # BFS to mark all connected zero cells in this region
-        q = deque([(r, c)])
-        while q:
-            cr, cc = q.popleft()
-            if (cr, cc) in visited:
-                continue
-            visited.add((cr, cc))
-            for dr in range(-1, 2):
-                for dc in range(-1, 2):
-                    if dr == 0 and dc == 0:
-                        continue
-                    nr, nc = cr + dr, cc + dc
-                    if (
-                        0 <= nr < ROWS
-                        and 0 <= nc < COLS
-                        and (nr, nc) not in visited
-                        and not board[nr][nc]["isMine"]
-                        and board[nr][nc]["adjacentMines"] == 0
-                    ):
-                        q.append((nr, nc))
-
-    return representatives
-
-
-def _generate_board() -> list[list[dict]]:
-    """Place mines randomly on a 30x16 grid and compute adjacency."""
-    all_positions = [(r, c) for r in range(ROWS) for c in range(COLS)]
     mines = set(random.sample(all_positions, MINE_COUNT))
 
     board = [
@@ -82,30 +54,105 @@ def _generate_board() -> list[list[dict]]:
     return board
 
 
-def generate_solvable_board(max_attempts: int = 1000) -> tuple[list[list[dict]], tuple[int, int]]:
-    """Generate a solvable board and return (board, starting_square).
+def _is_solvable_by(
+    board: list[list[dict]], start_row: int, start_col: int, solver: Solver
+) -> bool:
+    """Run the given solver against the board starting from (start_row, start_col).
 
-    Tries random mine placements until one is solvable from at least one zero cell.
-    Groups zero cells by connected region to avoid redundant solver calls.
+    Returns True iff the solver can deduce every non-mine cell without guessing.
     """
-    for _ in range(max_attempts):
-        board = _generate_board()
-        zero_cells = _find_zero_cells(board)
-        if not zero_cells:
+    total_safe = ROWS * COLS - MINE_COUNT
+    state = [["unknown"] * COLS for _ in range(ROWS)]
+    revealed_count = 0
+
+    def reveal_flood_fill(r: int, c: int) -> dict[tuple[int, int], int]:
+        nonlocal revealed_count
+        queue = deque([(r, c)])
+        revealed: dict[tuple[int, int], int] = {}
+        while queue:
+            rr, cc = queue.popleft()
+            if state[rr][cc] != "unknown":
+                continue
+            adj = board[rr][cc]["adjacentMines"]
+            state[rr][cc] = adj
+            revealed_count += 1
+            revealed[(rr, cc)] = adj
+            if adj == 0:
+                for dr in range(-1, 2):
+                    for dc in range(-1, 2):
+                        if dr == 0 and dc == 0:
+                            continue
+                        nr, nc = rr + dr, cc + dc
+                        if 0 <= nr < ROWS and 0 <= nc < COLS and state[nr][nc] == "unknown":
+                            queue.append((nr, nc))
+        return revealed
+
+    newly_revealed = reveal_flood_fill(start_row, start_col)
+
+    while newly_revealed:
+        safe_cells = solver.find_solved_squares(newly_revealed)
+        all_revealed: dict[tuple[int, int], int] = {}
+        for r, c in safe_cells:
+            revealed = reveal_flood_fill(r, c)
+            all_revealed.update(revealed)
+        newly_revealed = all_revealed
+
+    return revealed_count == total_safe
+
+
+SolverFactory = Callable[[], Solver]
+
+DIFFICULTY_SOLVERS: dict[Difficulty, dict[str, Optional[SolverFactory]]] = {
+    "beginner": {
+        "target": lambda: BasicSolver(ROWS, COLS),
+        "lower": None,
+    },
+    "intermediate": {
+        "target": lambda: SubsetSolver(ROWS, COLS),
+        "lower": lambda: BasicSolver(ROWS, COLS),
+    },
+    "advanced": {
+        "target": lambda: ProbabilisticSolver(ROWS, COLS, MINE_COUNT),
+        "lower": lambda: SubsetSolver(ROWS, COLS),
+    },
+    "expert": {
+        "target": lambda: PerfectSolver(ROWS, COLS, MINE_COUNT),
+        "lower": lambda: ProbabilisticSolver(ROWS, COLS, MINE_COUNT),
+    },
+}
+
+
+def generate_solvable_board(
+    start_row: int,
+    start_col: int,
+    difficulty: Difficulty = "expert",
+    max_attempts: int = 1000,
+) -> tuple[list[list[dict]], tuple[int, int]]:
+    """Generate a solvable board for the given starting square and difficulty.
+
+    A board is accepted only when the target solver can solve it AND (if the
+    tier has one) the next-lower solver cannot, guaranteeing the board
+    genuinely requires that tier's reasoning.
+    """
+    tier = DIFFICULTY_SOLVERS[difficulty]
+    target_factory = tier["target"]
+    lower_factory = tier["lower"]
+
+    t0 = time.perf_counter()
+    for attempt in range(max_attempts):
+        board = _generate_random_board(start_row, start_col)
+        if not _is_solvable_by(board, start_row, start_col, target_factory()):
             continue
+        if lower_factory and _is_solvable_by(board, start_row, start_col, lower_factory()):
+            continue
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        print(f"[board-gen] {difficulty}: found in {attempt + 1} attempts, {elapsed_ms:.1f}ms")
+        return board, (start_row, start_col)
 
-        # Only test one cell per connected zero-region
-        representatives = _unique_starting_regions(board, zero_cells)
-        random.shuffle(representatives)
-
-        for start in representatives:
-            if is_solvable(board, start[0], start[1]):
-                # Pick a random zero cell from this region as the actual starting square
-                return board, start
-
-    # Fallback (should not happen with 1000 attempts)
-    board = _generate_board()
-    zero_cells = _find_zero_cells(board)
-    if zero_cells:
-        return board, random.choice(zero_cells)
-    return board, (0, 0)
+    # Fallback: return something solvable by the target (ignore lower-bound rejection)
+    print(f"[board-gen] {difficulty}: fallback after {max_attempts} attempts")
+    for _ in range(max_attempts):
+        board = _generate_random_board(start_row, start_col)
+        if _is_solvable_by(board, start_row, start_col, target_factory()):
+            return board, (start_row, start_col)
+    return _generate_random_board(start_row, start_col), (start_row, start_col)
