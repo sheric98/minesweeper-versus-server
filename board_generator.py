@@ -126,7 +126,7 @@ def generate_solvable_board(
     start_row: int,
     start_col: int,
     difficulty: Difficulty = "expert",
-    max_attempts: int = 1000,
+    max_attempts: int = 10000,
 ) -> tuple[list[list[dict]], tuple[int, int]]:
     """Generate a solvable board for the given starting square and difficulty.
 
