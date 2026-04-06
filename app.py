@@ -19,6 +19,7 @@ def create_app():
     from matchmaking import matchmaking_bp
     from leaderboard import leaderboard_bp
     from head_to_head import head_to_head_bp
+    from board_endpoint import board_bp
     from websocket_handler import sock
 
     app.register_blueprint(auth_bp)
@@ -26,7 +27,12 @@ def create_app():
     app.register_blueprint(matchmaking_bp)
     app.register_blueprint(leaderboard_bp)
     app.register_blueprint(head_to_head_bp)
+    app.register_blueprint(board_bp)
     sock.init_app(app)
+
+    if DATABASE_URL:
+        from board_replenisher import start_replenisher
+        start_replenisher()
 
     return app
 

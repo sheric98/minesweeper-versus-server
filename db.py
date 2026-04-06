@@ -62,6 +62,17 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_h2h_player1 ON head_to_head_records (player1_id);
                 CREATE INDEX IF NOT EXISTS idx_h2h_player2 ON head_to_head_records (player2_id);
+
+                CREATE TABLE IF NOT EXISTS board_cache (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    difficulty VARCHAR(15) NOT NULL,
+                    start_row SMALLINT NOT NULL,
+                    start_col SMALLINT NOT NULL,
+                    board_data BYTEA NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_board_cache_lookup
+                    ON board_cache (difficulty, start_row, start_col);
             """)
         conn.commit()
     finally:
