@@ -4,9 +4,17 @@ import threading
 import time
 
 from board_generator import generate_solvable_board
+from board_cache import get_cached_board
 from board_encoder import encode_board
 from session_tracker import tracker
 from config import COUNTDOWN_SECONDS, DATABASE_URL, ROWS, COLS
+
+DIFFICULTY_WEIGHTS = [
+    ("beginner", 0.10),
+    ("intermediate", 0.40),
+    ("advanced", 0.40),
+    ("expert", 0.10),
+]
 
 
 class Match:
@@ -38,9 +46,16 @@ class Match:
         """Run the match lifecycle in a background thread."""
         start_row = random.randrange(ROWS)
         start_col = random.randrange(COLS)
-        self.board, self.starting_square = generate_solvable_board(
-            start_row, start_col, difficulty="expert"
-        )
+        difficulties, weights = zip(*DIFFICULTY_WEIGHTS)
+        difficulty = random.choices(difficulties, weights=weights, k=1)[0]
+        cached = get_cached_board(difficulty, start_row, start_col)
+        if cached is not None:
+            self.board = cached
+            self.starting_square = (start_row, start_col)
+        else:
+            self.board, self.starting_square = generate_solvable_board(
+                start_row, start_col, difficulty=difficulty
+            )
         encoded = encode_board(self.board, self.match_id)
 
         # Send match_found to both
