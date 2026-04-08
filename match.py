@@ -174,15 +174,20 @@ class Match:
 
         opponent = self.player2 if username == self.player1 else self.player1
 
+        # Compute Elo changes before sending game_over
+        elo_changes = self._update_elo_ratings(winner)
+
         # Send personalized game_over to each player
         for uname, ws in self.connections.items():
-            other = self.player2 if uname == self.player1 else self.player1
-            self._send(ws, {
+            payload = {
                 "type": "game_over",
                 "winner": winner,
                 "yourTimeMs": msg.get("timeMs", 0) if uname == username else 0,
                 "opponentTimeMs": msg.get("timeMs", 0) if uname != username else 0,
-            })
+            }
+            if elo_changes and uname in elo_changes:
+                payload["eloChange"] = elo_changes[uname]
+            self._send(ws, payload)
 
         # Record head-to-head result if both players are Google-authenticated
         self._record_h2h_result(winner)
@@ -220,6 +225,61 @@ class Match:
         except Exception:
             pass
 
+    def _update_elo_ratings(self, winner: str) -> dict | None:
+        """Update Elo ratings for both players. Returns rating change info or None."""
+        if not DATABASE_URL:
+            return None
+        winner_id = self.user_ids.get(winner)
+        loser = self.player2 if winner == self.player1 else self.player1
+        loser_id = self.user_ids.get(loser)
+        if not winner_id or not loser_id:
+            return None
+
+        from elo import compute_rating_changes, DEFAULT_RATING
+        from db import get_conn
+
+        try:
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    # Ensure both players have rating rows
+                    cur.execute(
+                        "INSERT INTO elo_ratings (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
+                        (winner_id,),
+                    )
+                    cur.execute(
+                        "INSERT INTO elo_ratings (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
+                        (loser_id,),
+                    )
+                    # Fetch current ratings with lock
+                    cur.execute(
+                        "SELECT user_id, rating FROM elo_ratings WHERE user_id IN (%s, %s) FOR UPDATE",
+                        (winner_id, loser_id),
+                    )
+                    rows = {str(r[0]): r[1] for r in cur.fetchall()}
+                    old_winner = rows.get(winner_id, DEFAULT_RATING)
+                    old_loser = rows.get(loser_id, DEFAULT_RATING)
+
+                    new_winner, new_loser = compute_rating_changes(old_winner, old_loser)
+
+                    cur.execute(
+                        "UPDATE elo_ratings SET rating = %s, wins = wins + 1, updated_at = now() WHERE user_id = %s",
+                        (new_winner, winner_id),
+                    )
+                    cur.execute(
+                        "UPDATE elo_ratings SET rating = %s, losses = losses + 1, updated_at = now() WHERE user_id = %s",
+                        (new_loser, loser_id),
+                    )
+                conn.commit()
+                return {
+                    winner: {"oldRating": old_winner, "newRating": new_winner, "change": new_winner - old_winner},
+                    loser: {"oldRating": old_loser, "newRating": new_loser, "change": new_loser - old_loser},
+                }
+            finally:
+                conn.close()
+        except Exception:
+            return None
+
     def handle_disconnect(self, username: str):
         opponent = self.player2 if username == self.player1 else self.player1
         opponent_ws = self.connections.get(opponent)
@@ -234,9 +294,17 @@ class Match:
                 self._send(opponent_ws, {"type": "rematch_declined"})
                 self._send(opponent_ws, {"type": "opponent_disconnected"})
         else:
-            # Mid-game disconnect: opponent wins
+            # Mid-game disconnect: opponent wins (only record if game started)
+            if self.start_time is not None:
+                self._record_h2h_result(opponent)
+                elo_changes = self._update_elo_ratings(opponent)
+            else:
+                elo_changes = None
             if opponent_ws:
-                self._send(opponent_ws, {"type": "opponent_disconnected"})
+                payload = {"type": "opponent_disconnected"}
+                if elo_changes and opponent in elo_changes:
+                    payload["eloChange"] = elo_changes[opponent]
+                self._send(opponent_ws, payload)
 
         tracker.set_online(self.player1)
         tracker.set_online(self.player2)

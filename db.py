@@ -63,6 +63,15 @@ def init_db():
                 CREATE INDEX IF NOT EXISTS idx_h2h_player1 ON head_to_head_records (player1_id);
                 CREATE INDEX IF NOT EXISTS idx_h2h_player2 ON head_to_head_records (player2_id);
 
+                CREATE TABLE IF NOT EXISTS elo_ratings (
+                    user_id UUID PRIMARY KEY REFERENCES users(id),
+                    rating INTEGER NOT NULL DEFAULT 1200,
+                    wins INTEGER NOT NULL DEFAULT 0,
+                    losses INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_elo_ratings_rating ON elo_ratings (rating DESC);
+
                 CREATE TABLE IF NOT EXISTS board_cache (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     difficulty VARCHAR(15) NOT NULL,

@@ -20,6 +20,7 @@ def create_app():
     from leaderboard import leaderboard_bp
     from head_to_head import head_to_head_bp
     from board_endpoint import board_bp
+    from elo_endpoints import elo_bp
     from websocket_handler import sock
 
     app.register_blueprint(auth_bp)
@@ -28,6 +29,7 @@ def create_app():
     app.register_blueprint(leaderboard_bp)
     app.register_blueprint(head_to_head_bp)
     app.register_blueprint(board_bp)
+    app.register_blueprint(elo_bp)
     sock.init_app(app)
 
     if DATABASE_URL:
