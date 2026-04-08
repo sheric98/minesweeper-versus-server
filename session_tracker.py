@@ -41,6 +41,12 @@ class SessionTracker:
                 self._sessions[username]["status"] = "online"
                 self._sessions[username]["match_id"] = None
 
+    def set_queued(self, username: str):
+        with self._lock:
+            if username in self._sessions:
+                self._sessions[username]["status"] = "queued"
+                self._sessions[username]["match_id"] = None
+
     def get_active_players(self, exclude: str | None = None) -> list[dict]:
         now = time.time()
         with self._lock:

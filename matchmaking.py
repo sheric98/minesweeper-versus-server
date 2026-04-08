@@ -105,12 +105,17 @@ def send_invite():
     if not tracker.is_active(target):
         return jsonify({"error": "Player not online"}), 404
 
+    # Pull sender out of queue if they're in it
+    from matchmaking_queue import matchmaking_queue
+    matchmaking_queue.leave(g.username)
+
     # Check for a reverse pending invite (target already invited us)
     reverse_invite_id = invite_store.find_pending_between(target, g.username)
     if reverse_invite_id:
         result = invite_store.respond(reverse_invite_id, True)
         if result and result["match_id"]:
             from match import match_manager
+            matchmaking_queue.leave(target)
             match_manager.create_match(result["match_id"], result["from"], result["to"])
             return jsonify({"matchId": result["match_id"]})
 
@@ -149,6 +154,8 @@ def respond_invite():
 
     if accept:
         from match import match_manager
+        from matchmaking_queue import matchmaking_queue
+        matchmaking_queue.leave(g.username)
         match_manager.create_match(result["match_id"], result["from"], result["to"])
         return jsonify({"matchId": result["match_id"]})
     return jsonify({})
