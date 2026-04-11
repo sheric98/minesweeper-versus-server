@@ -16,6 +16,7 @@ class SubsetSolver(Solver):
 
         for cell, adj in newly_revealed.items():
             self.revealed_cells[cell] = adj
+            self._mark_revealed(cell)
 
         safe_cells: set[Cell] = set()
         changed = True
@@ -93,6 +94,7 @@ class SubsetSolver(Solver):
                     for cell in group.cells:
                         if cell not in self.known_mines:
                             self.known_mines.add(cell)
+                            self._mark_mine(cell)
                             changed = True
 
         revealed_set = set(self.revealed_cells.keys())

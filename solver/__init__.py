@@ -1,5 +1,6 @@
 from .solver_types import (
     Cell,
+    FrontierSets,
     MineGroup,
     ConnectedMineGroup,
     Solver,
@@ -8,10 +9,12 @@ from .solver_types import (
 )
 from .basic_solver import BasicSolver
 from .subset_solver import SubsetSolver
-from .perfect_solver import PerfectSolver, ProbabilisticSolver
+from .perfect_solver import PerfectSolver
+from .probabilistic_solver import ProbabilisticSolver
 
 __all__ = [
     "Cell",
+    "FrontierSets",
     "MineGroup",
     "ConnectedMineGroup",
     "Solver",

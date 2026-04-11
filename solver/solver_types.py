@@ -24,6 +24,24 @@ class SolverResult:
     probs: dict[Cell, float] = field(default_factory=dict)
 
 
+@dataclass
+class FrontierSets:
+    """Disjoint partition of currently-unknown cells by distance from the
+    revealed region. 'Unknown' excludes revealed cells and cells the solver
+    has flagged as mines.
+
+    - frontier: unknowns adjacent to at least one revealed cell.
+    - near_frontier: unknowns adjacent to the frontier but not themselves
+        adjacent to any revealed cell.
+    - deep: all other unknowns (neither adjacent to revealed nor adjacent
+        to the frontier).
+    """
+
+    frontier: set[Cell] = field(default_factory=set)
+    near_frontier: set[Cell] = field(default_factory=set)
+    deep: set[Cell] = field(default_factory=set)
+
+
 class MineGroup:
     def __init__(self, cells: set[Cell], mines: int):
         self.cells = cells
@@ -355,6 +373,17 @@ class Solver(ABC):
         self.width = width
         self.num_mines = num_mines
 
+        # Incrementally-maintained partition of currently-unknown cells.
+        # Subclasses MUST call _mark_revealed / _mark_mine whenever they
+        # transition a cell from unknown to revealed or flagged-as-mine.
+        # `_unknown` is the union of the three partition sets and exists
+        # only to make membership checks O(1) without a three-set test.
+        all_cells: set[Cell] = {(r, c) for r in range(height) for c in range(width)}
+        self._unknown: set[Cell] = set(all_cells)
+        self._frontier: set[Cell] = set()
+        self._near_frontier: set[Cell] = set()
+        self._deep: set[Cell] = set(all_cells)
+
     def _neighbors(self, r: int, c: int) -> list[Cell]:
         return [
             (r + dr, c + dc)
@@ -413,3 +442,90 @@ class Solver(ABC):
         return a SolverResult with newly-deduced safe/mine cells and a
         per-cell mine probability snapshot for every currently-unknown cell."""
         ...
+
+    def _mark_revealed(self, cell: Cell) -> None:
+        """Incrementally update the frontier partition when `cell` goes
+        from unknown to revealed. Subclasses must call this exactly once
+        per cell as they record reveals into their own state.
+
+        Idempotent: a second call on the same cell is a no-op.
+        """
+        if cell not in self._unknown:
+            return
+
+        # Remove the revealed cell from whichever partition set held it.
+        self._unknown.discard(cell)
+        self._frontier.discard(cell)
+        self._near_frontier.discard(cell)
+        self._deep.discard(cell)
+
+        # Every unknown neighbor of `cell` is now adjacent to a revealed
+        # cell, so it must be in frontier. If it's already in frontier we
+        # leave it alone; otherwise promote it. Note: if the revealed
+        # cell was itself in frontier, any unknown neighbor that was in
+        # near_frontier only because of it would now be re-anchored to
+        # frontier via this promotion anyway, so no separate demote step
+        # is needed in the reveal path.
+        for n in self._neighbors(*cell):
+            if n not in self._unknown or n in self._frontier:
+                continue
+            self._promote_to_frontier(n)
+
+    def _mark_mine(self, cell: Cell) -> None:
+        """Incrementally update the frontier partition when `cell` goes
+        from unknown to flagged-as-mine. Subclasses must call this once
+        per cell as they record mine flags. Idempotent.
+        """
+        if cell not in self._unknown:
+            return
+
+        was_frontier = cell in self._frontier
+        self._unknown.discard(cell)
+        self._frontier.discard(cell)
+        self._near_frontier.discard(cell)
+        self._deep.discard(cell)
+
+        # Mines don't add revealed-adjacency, so no cells get promoted.
+        # But if `cell` was in frontier, any near-frontier neighbor that
+        # was anchored only by `cell` loses its last frontier anchor and
+        # must demote back to deep. Frontier neighbors of `cell` are
+        # unaffected (their frontier status is about adjacency to
+        # revealed cells, not to other frontier cells).
+        if was_frontier:
+            for n in self._neighbors(*cell):
+                if n in self._near_frontier and not self._has_frontier_neighbor(n):
+                    self._near_frontier.discard(n)
+                    self._deep.add(n)
+
+    def _promote_to_frontier(self, cell: Cell) -> None:
+        """Move `cell` from near_frontier / deep into frontier, and shift
+        its unknown deep-neighbors into near_frontier. Caller must have
+        verified `cell` is in `_unknown` and not already in `_frontier`.
+        """
+        self._near_frontier.discard(cell)
+        self._deep.discard(cell)
+        self._frontier.add(cell)
+        for k in self._neighbors(*cell):
+            if k in self._deep:
+                self._deep.discard(k)
+                self._near_frontier.add(k)
+
+    def _has_frontier_neighbor(self, cell: Cell) -> bool:
+        for n in self._neighbors(*cell):
+            if n in self._frontier:
+                return True
+        return False
+
+    def get_frontier_sets(self) -> FrontierSets:
+        """Return the maintained partition of currently-unknown cells into
+        frontier, near-frontier, and deep sets. O(1).
+
+        The returned dataclass holds LIVE references to the solver's
+        internal sets — callers must not mutate them, and any subsequent
+        call to find_solved_squares will update them in place.
+        """
+        return FrontierSets(
+            frontier=self._frontier,
+            near_frontier=self._near_frontier,
+            deep=self._deep,
+        )

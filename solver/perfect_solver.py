@@ -43,6 +43,7 @@ class PerfectSolver(Solver):
         # 1. Mark each revealed cell as safe internally
         for cell in newly_revealed:
             self.revealed_cells.add(cell)
+            self._mark_revealed(cell)
             self.tiles_without_information.discard(cell)
             cg = self.connected_groups.get(cell)
             if cg:
@@ -134,6 +135,7 @@ class PerfectSolver(Solver):
             if key in self.mine_cells:
                 continue
             self.mine_cells.add(key)
+            self._mark_mine(key)
             self.tiles_without_information.discard(key)
             self.remaining_mines -= 1
             cg = self.connected_groups.get(key)
@@ -171,10 +173,3 @@ class PerfectSolver(Solver):
                 probs[cell] = density
 
         return SolverResult(safe=new_safe, mines=new_mines, probs=probs)
-
-
-class ProbabilisticSolver(PerfectSolver):
-    """Perfect-solver reasoning without the global mine-count constraint."""
-
-    def __init__(self, height: int, width: int, num_mines: int):
-        super().__init__(height, width, num_mines, use_global_mine_count=False)

@@ -17,6 +17,7 @@ class BasicSolver(Solver):
 
         for cell, adj in newly_revealed.items():
             self.revealed_cells[cell] = adj
+            self._mark_revealed(cell)
 
         safe_cells: set[Cell] = set()
         changed = True
@@ -43,6 +44,7 @@ class BasicSolver(Solver):
                     for nk in unknown_neighbors:
                         if nk not in self.known_mines:
                             self.known_mines.add(nk)
+                            self._mark_mine(nk)
                             changed = True
 
                 # Rule 2: all unknown neighbors are safe
