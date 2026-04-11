@@ -90,9 +90,9 @@ def _is_solvable_by(
     newly_revealed = reveal_flood_fill(start_row, start_col)
 
     while newly_revealed:
-        safe_cells = solver.find_solved_squares(newly_revealed)
+        result = solver.find_solved_squares(newly_revealed)
         all_revealed: dict[tuple[int, int], int] = {}
-        for r, c in safe_cells:
+        for r, c in result.safe:
             revealed = reveal_flood_fill(r, c)
             all_revealed.update(revealed)
         newly_revealed = all_revealed
@@ -104,16 +104,16 @@ SolverFactory = Callable[[], Solver]
 
 DIFFICULTY_SOLVERS: dict[Difficulty, dict[str, Optional[SolverFactory]]] = {
     "beginner": {
-        "target": lambda: BasicSolver(ROWS, COLS),
+        "target": lambda: BasicSolver(ROWS, COLS, MINE_COUNT),
         "lower": None,
     },
     "intermediate": {
-        "target": lambda: SubsetSolver(ROWS, COLS),
-        "lower": lambda: BasicSolver(ROWS, COLS),
+        "target": lambda: SubsetSolver(ROWS, COLS, MINE_COUNT),
+        "lower": lambda: BasicSolver(ROWS, COLS, MINE_COUNT),
     },
     "advanced": {
         "target": lambda: ProbabilisticSolver(ROWS, COLS, MINE_COUNT),
-        "lower": lambda: SubsetSolver(ROWS, COLS),
+        "lower": lambda: SubsetSolver(ROWS, COLS, MINE_COUNT),
     },
     "expert": {
         "target": lambda: PerfectSolver(ROWS, COLS, MINE_COUNT),

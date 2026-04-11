@@ -3,6 +3,7 @@ from .solver_types import (
     MineGroup,
     ConnectedMineGroup,
     Solver,
+    SolverResult,
     merge_disjointed_connected_groups,
 )
 from .basic_solver import BasicSolver
@@ -14,6 +15,7 @@ __all__ = [
     "MineGroup",
     "ConnectedMineGroup",
     "Solver",
+    "SolverResult",
     "BasicSolver",
     "SubsetSolver",
     "PerfectSolver",

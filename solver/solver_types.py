@@ -1,9 +1,27 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
+from dataclasses import dataclass, field
 from typing import Optional
 
 
 Cell = tuple[int, int]
+
+
+@dataclass
+class SolverResult:
+    """Bundled output of a solver call.
+
+    - safe: cells newly deduced as safe by this call
+    - mines: cells newly deduced as mines by this call
+    - probs: mine probability in [0, 1] for EVERY currently-unknown cell
+        (cells the solver has neither revealed nor proven to be mines).
+        Cells already proven safe/mine — including those just deduced this
+        call — appear at exactly 0.0 / 1.0.
+    """
+
+    safe: set[Cell] = field(default_factory=set)
+    mines: set[Cell] = field(default_factory=set)
+    probs: dict[Cell, float] = field(default_factory=dict)
 
 
 class MineGroup:
@@ -89,7 +107,9 @@ class ConnectedMineGroup:
             MineGroup(diff_cells, diff_mines),
         )
 
-    def solve_groups(self, num_remaining_mines: int) -> tuple[set[Cell], set[Cell], int]:
+    def solve_groups(
+        self, num_remaining_mines: int
+    ) -> tuple[set[Cell], set[Cell], int, dict[Cell, float], int]:
         """Solve via backtracking over all valid mine permutations.
 
         For each subgroup, try every way to place its mines among its cells.
@@ -97,7 +117,12 @@ class ConnectedMineGroup:
         the same cells. Cells that are always safe or always mine across all
         valid permutations are definitively deduced.
 
-        Returns (safe_cells, mine_cells, max_possible_mines_used).
+        Returns (safe_cells, mine_cells, max_possible_mines_used, cell_probs,
+        total_valid). cell_probs gives mine probability cell_mine_count/total_valid
+        for every cell in the component (proven safe/mine cells overridden to
+        exactly 0.0/1.0). total_valid is the number of valid permutations
+        enumerated; 0 indicates contradictory constraints, in which case
+        cell_probs is empty.
         """
         # Collect unique subgroups
         all_subgroups: list[MineGroup] = []
@@ -109,7 +134,7 @@ class ConnectedMineGroup:
                     all_subgroups.append(g)
 
         if not all_subgroups:
-            return set(), set(), 0
+            return set(), set(), 0, {}, 1
 
         # Phase 1: filter out trivial groups (all safe / all mines)
         safe_cells: set[Cell] = set()
@@ -126,7 +151,12 @@ class ConnectedMineGroup:
 
         if not backtrack_groups:
             max_mines = len(mine_cells)
-            return safe_cells, mine_cells, max_mines
+            cell_probs: dict[Cell, float] = {}
+            for c in safe_cells:
+                cell_probs[c] = 0.0
+            for c in mine_cells:
+                cell_probs[c] = 1.0
+            return safe_cells, mine_cells, max_mines, cell_probs, 1
 
         # Phase 2: backtracking over non-trivial groups
         all_cells: set[Cell] = set()
@@ -206,7 +236,17 @@ class ConnectedMineGroup:
                 elif cell_safe_count[cell] == total_valid:
                     safe_cells.add(cell)
 
-        return safe_cells, mine_cells, max_mines_used
+        cell_probs: dict[Cell, float] = {}
+        if total_valid > 0:
+            for cell in all_cells:
+                if cell in safe_cells:
+                    cell_probs[cell] = 0.0
+                elif cell in mine_cells:
+                    cell_probs[cell] = 1.0
+                else:
+                    cell_probs[cell] = cell_mine_count[cell] / total_valid
+
+        return safe_cells, mine_cells, max_mines_used, cell_probs, total_valid
 
     def reassess_for_subsets(self):
         """Re-check subgroups for subset relationships and split one pair if found."""
@@ -305,8 +345,9 @@ class Solver(ABC):
 
     Subclasses maintain their own internal state (revealed cells, known mines,
     constraint groups). Each call to find_solved_squares is given the map of
-    cells newly revealed since the previous call, and returns the cells the
-    solver has deduced are safe.
+    cells newly revealed since the previous call, and returns a SolverResult
+    bundling newly-deduced safe cells, newly-deduced mine cells, and a per-cell
+    mine probability snapshot for every currently-unknown cell.
     """
 
     def __init__(self, height: int, width: int, num_mines: int):
@@ -322,8 +363,53 @@ class Solver(ABC):
             if (dr != 0 or dc != 0) and 0 <= r + dr < self.height and 0 <= c + dc < self.width
         ]
 
+    def _density_only_probs(
+        self,
+        revealed: set[Cell],
+        known_mines: set[Cell],
+        safe_cells: set[Cell],
+    ) -> dict[Cell, float]:
+        """Build a probability snapshot using only global mine density.
+
+        Used by solver tiers (Basic, Subset) that don't decompose the fringe
+        into constraint components. Cells in safe_cells are reported as 0.0,
+        cells in known_mines are excluded from the key set, and every other
+        unknown cell shares the global density (num_mines - len(known_mines))
+        / unknown_count, clamped to [0, 1].
+        """
+        probs: dict[Cell, float] = {}
+        unknown_cells: list[Cell] = []
+        for r in range(self.height):
+            for c in range(self.width):
+                cell = (r, c)
+                if cell in revealed or cell in known_mines:
+                    continue
+                unknown_cells.append(cell)
+
+        if not unknown_cells:
+            return probs
+
+        remaining_mines = self.num_mines - len(known_mines)
+        # Cells already proven safe contribute zero mines to the remaining
+        # density, so subtract them from both numerator-context and the
+        # divisor's "uncertain" pool.
+        uncertain_count = len(unknown_cells) - len(safe_cells)
+        if uncertain_count > 0:
+            density = remaining_mines / uncertain_count
+            density = max(0.0, min(1.0, density))
+        else:
+            density = 0.0
+
+        for cell in unknown_cells:
+            if cell in safe_cells:
+                probs[cell] = 0.0
+            else:
+                probs[cell] = density
+        return probs
+
     @abstractmethod
-    def find_solved_squares(self, newly_revealed: dict[Cell, int]) -> list[Cell]:
+    def find_solved_squares(self, newly_revealed: dict[Cell, int]) -> SolverResult:
         """Given cells newly revealed since last call (cell -> adjacentMines),
-        return cells the solver has deduced are safe."""
+        return a SolverResult with newly-deduced safe/mine cells and a
+        per-cell mine probability snapshot for every currently-unknown cell."""
         ...

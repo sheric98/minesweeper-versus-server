@@ -3,6 +3,7 @@ from .solver_types import (
     ConnectedMineGroup,
     MineGroup,
     Solver,
+    SolverResult,
     merge_disjointed_connected_groups,
 )
 
@@ -14,6 +15,13 @@ class PerfectSolver(Solver):
     When use_global_mine_count is True, the solver uses the total remaining
     mine count to prune permutations and to deduce that all unconstrained
     tiles are mines when the remaining-mine budget is exhausted.
+
+    The returned SolverResult.probs gives a per-component mine probability
+    snapshot for every currently-unknown cell. Per-component probabilities
+    are correct under the per-component mine-budget constraint but are NOT
+    jointly calibrated across components or against the global budget. This
+    is acceptable for bot move selection; full joint calibration would
+    require convolving component mine-count distributions.
     """
 
     def __init__(self, height: int, width: int, num_mines: int, use_global_mine_count: bool = True):
@@ -27,8 +35,11 @@ class PerfectSolver(Solver):
         self.tiles_without_information: set[Cell] = set(
             (r, c) for r in range(height) for c in range(width)
         )
+        self._last_expected_fringe_mines: float = 0.0
 
-    def find_solved_squares(self, newly_revealed: dict[Cell, int]) -> list[Cell]:
+    def find_solved_squares(self, newly_revealed: dict[Cell, int]) -> SolverResult:
+        prev_mines: set[Cell] = set(self.mine_cells)
+
         # 1. Mark each revealed cell as safe internally
         for cell in newly_revealed:
             self.revealed_cells.add(cell)
@@ -100,13 +111,17 @@ class PerfectSolver(Solver):
         to_reveal: list[Cell] = []
         to_mark_mine: set[Cell] = set()
         max_mines_used = 0
+        fringe_probs: dict[Cell, float] = {}
+        expected_fringe_mines = 0.0
         mine_budget = self.remaining_mines if self.use_global_mine_count else float('inf')
         for group in self.all_groups:
-            safe_cells, mine_cells, group_max = group.solve_groups(mine_budget)
+            safe_cells, mine_cells, group_max, group_probs, _total_valid = group.solve_groups(mine_budget)
             for c in safe_cells:
                 to_reveal.append(c)
             to_mark_mine.update(mine_cells)
             max_mines_used += group_max
+            fringe_probs.update(group_probs)
+            expected_fringe_mines += sum(group_probs.values())
 
         # 6. Check global mine constraint on unconstrained tiles
         if self.use_global_mine_count:
@@ -125,7 +140,37 @@ class PerfectSolver(Solver):
             if cg:
                 cg.mark_mine(key)
 
-        return to_reveal
+        self._last_expected_fringe_mines = expected_fringe_mines
+
+        # 8. Build the SolverResult: bundle newly-deduced safe/mine cells
+        # plus a per-cell probability snapshot covering every unknown cell.
+        new_safe = set(to_reveal)
+        new_mines = self.mine_cells - prev_mines
+
+        probs: dict[Cell, float] = {}
+        # Fringe cells from the constraint components (skip cells the solver
+        # has since flagged as mines this turn — they've left their groups).
+        for cell, p in fringe_probs.items():
+            if cell in self.mine_cells or cell in self.revealed_cells:
+                continue
+            probs[cell] = p
+        # Force certainty on newly-deduced safe cells (in case any lingered
+        # at a fractional value before promotion).
+        for cell in new_safe:
+            if cell in self.revealed_cells or cell in self.mine_cells:
+                continue
+            probs[cell] = 0.0
+
+        # Global density fallback for unconstrained tiles.
+        if self.tiles_without_information:
+            uncertain_count = len(self.tiles_without_information)
+            remaining = self.remaining_mines - expected_fringe_mines
+            density = remaining / uncertain_count if uncertain_count > 0 else 0.0
+            density = max(0.0, min(1.0, density))
+            for cell in self.tiles_without_information:
+                probs[cell] = density
+
+        return SolverResult(safe=new_safe, mines=new_mines, probs=probs)
 
 
 class ProbabilisticSolver(PerfectSolver):

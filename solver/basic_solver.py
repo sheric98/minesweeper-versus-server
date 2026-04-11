@@ -1,4 +1,4 @@
-from .solver_types import Cell, Solver
+from .solver_types import Cell, Solver, SolverResult
 
 
 class BasicSolver(Solver):
@@ -7,12 +7,14 @@ class BasicSolver(Solver):
     the count of unknown+known-mine neighbors equals the number, the unknowns
     are all mines."""
 
-    def __init__(self, height: int, width: int):
-        super().__init__(height, width, 0)
+    def __init__(self, height: int, width: int, num_mines: int):
+        super().__init__(height, width, num_mines)
         self.revealed_cells: dict[Cell, int] = {}
         self.known_mines: set[Cell] = set()
 
-    def find_solved_squares(self, newly_revealed: dict[Cell, int]) -> list[Cell]:
+    def find_solved_squares(self, newly_revealed: dict[Cell, int]) -> SolverResult:
+        prev_known: set[Cell] = set(self.known_mines)
+
         for cell, adj in newly_revealed.items():
             self.revealed_cells[cell] = adj
 
@@ -50,4 +52,10 @@ class BasicSolver(Solver):
                             safe_cells.add(nk)
                             changed = True
 
-        return list(safe_cells)
+        revealed_set = set(self.revealed_cells.keys())
+        probs = self._density_only_probs(revealed_set, self.known_mines, safe_cells)
+        return SolverResult(
+            safe=safe_cells,
+            mines=self.known_mines - prev_known,
+            probs=probs,
+        )
