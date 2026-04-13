@@ -1,8 +1,8 @@
 import random
 import time
-from collections import deque
 from typing import Callable, Optional
 
+from bots.flood_fill import flood_fill_reveal
 from config import ROWS, COLS, MINE_COUNT
 from solver import (
     BasicSolver,
@@ -63,37 +63,16 @@ def _is_solvable_by(
     """
     total_safe = ROWS * COLS - MINE_COUNT
     state = [["unknown"] * COLS for _ in range(ROWS)]
-    revealed_count = 0
 
-    def reveal_flood_fill(r: int, c: int) -> dict[tuple[int, int], int]:
-        nonlocal revealed_count
-        queue = deque([(r, c)])
-        revealed: dict[tuple[int, int], int] = {}
-        while queue:
-            rr, cc = queue.popleft()
-            if state[rr][cc] != "unknown":
-                continue
-            adj = board[rr][cc]["adjacentMines"]
-            state[rr][cc] = adj
-            revealed_count += 1
-            revealed[(rr, cc)] = adj
-            if adj == 0:
-                for dr in range(-1, 2):
-                    for dc in range(-1, 2):
-                        if dr == 0 and dc == 0:
-                            continue
-                        nr, nc = rr + dr, cc + dc
-                        if 0 <= nr < ROWS and 0 <= nc < COLS and state[nr][nc] == "unknown":
-                            queue.append((nr, nc))
-        return revealed
-
-    newly_revealed = reveal_flood_fill(start_row, start_col)
+    newly_revealed = flood_fill_reveal(board, state, (start_row, start_col))
+    revealed_count = len(newly_revealed)
 
     while newly_revealed:
         result = solver.find_solved_squares(newly_revealed)
         all_revealed: dict[tuple[int, int], int] = {}
         for r, c in result.safe:
-            revealed = reveal_flood_fill(r, c)
+            revealed = flood_fill_reveal(board, state, (r, c))
+            revealed_count += len(revealed)
             all_revealed.update(revealed)
         newly_revealed = all_revealed
 
