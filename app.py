@@ -1,3 +1,5 @@
+import os
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -40,6 +42,10 @@ def create_app():
 
     from matchmaking_queue import start_matchmaking_loop
     start_matchmaking_loop()
+
+    if os.getenv("BOTS_ENABLED") == "1":
+        from bots.registry import bot_registry
+        bot_registry.load()
 
     return app
 

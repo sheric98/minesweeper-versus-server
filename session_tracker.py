@@ -41,6 +41,11 @@ class SessionTracker:
                 self._sessions[username]["status"] = "online"
                 self._sessions[username]["match_id"] = None
 
+    def remove(self, username: str):
+        """Evict a session entirely. Used for bot logoffs."""
+        with self._lock:
+            self._sessions.pop(username, None)
+
     def set_queued(self, username: str):
         with self._lock:
             if username in self._sessions:
