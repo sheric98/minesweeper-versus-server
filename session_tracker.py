@@ -46,6 +46,13 @@ class SessionTracker:
         with self._lock:
             self._sessions.pop(username, None)
 
+    def get_status(self, username: str) -> str | None:
+        """Return current status ('online', 'in_game', 'queued') or None if
+        the session does not exist. Does not check heartbeat freshness."""
+        with self._lock:
+            s = self._sessions.get(username)
+            return s["status"] if s else None
+
     def set_queued(self, username: str):
         with self._lock:
             if username in self._sessions:

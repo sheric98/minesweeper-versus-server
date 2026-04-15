@@ -46,6 +46,8 @@ def create_app():
     if os.getenv("BOTS_ENABLED") == "1":
         from bots.registry import bot_registry
         bot_registry.load()
+        from bots.lifecycle import start_lifecycle_loops
+        start_lifecycle_loops()
 
     return app
 
