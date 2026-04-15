@@ -7,14 +7,7 @@ from board_generator import generate_solvable_board
 from board_cache import get_cached_board
 from board_encoder import encode_board
 from session_tracker import tracker
-from config import COUNTDOWN_SECONDS, DATABASE_URL, ROWS, COLS
-
-DIFFICULTY_WEIGHTS = [
-    ("beginner", 0.10),
-    ("intermediate", 0.40),
-    ("advanced", 0.40),
-    ("expert", 0.10),
-]
+from config import COUNTDOWN_SECONDS, DATABASE_URL, DIFFICULTY_WEIGHTS, ROWS, COLS
 
 
 class Match:

@@ -15,6 +15,7 @@ import random
 from dataclasses import dataclass
 from typing import Protocol
 
+from config import DEATH_COOLDOWN_BASE_MS, DEATH_COOLDOWN_STEP_MS
 from solver.solver_types import Cell
 
 from .brain import BotBrain
@@ -106,6 +107,15 @@ class BotRunner:
         if outcome.kind == "hit_mine":
             self.deaths += 1
             self.transport.send_hit_mine()
+            # Escalating cooldown mirroring cooldownDuration() in the
+            # frontend (minesweeper-web/app/lib/multiplayer-utils.ts).
+            # Uses (self.deaths - 1) because self.deaths was just
+            # incremented and the formula expects the pre-increment count.
+            cooldown_s = (
+                DEATH_COOLDOWN_BASE_MS
+                + (self.deaths - 1) * DEATH_COOLDOWN_STEP_MS
+            ) / 1000.0
+            self.next_action_at += cooldown_s
         elif outcome.kind == "revealed":
             if outcome.revealed:
                 self.transport.send_reveal(list(outcome.revealed.keys()))

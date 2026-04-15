@@ -18,12 +18,66 @@ import os
 import random
 import signal
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from board_generator import generate_solvable_board
+from config import COLS, DIFFICULTY_WEIGHTS, ROWS
 from elo import DEFAULT_RATING, compute_rating_changes
 
 from .config import BotConfig, load_profiles
 from .simulator import simulate_match
+
+
+@dataclass
+class _CachedBoard:
+    board: list[list[dict]]
+    start_cell: tuple[int, int]
+    played: set[str] = field(default_factory=set)
+
+
+class _BoardCache:
+    """Per-tournament cache of generated boards keyed by difficulty.
+
+    Each cached board tracks the set of bots that have already played on it.
+    A lookup returns the first board (for the requested difficulty) where
+    *neither* bot in the current match has played before — guaranteeing no
+    two bots ever face the same (board, start_cell) twice. On miss, a fresh
+    board is generated and appended to the cache.
+    """
+
+    def __init__(self, rng: random.Random) -> None:
+        self._by_difficulty: dict[str, list[_CachedBoard]] = {}
+        self._rng = rng
+
+    def get_or_generate(
+        self, difficulty: str, bot_a: str, bot_b: str
+    ) -> tuple[list[list[dict]], tuple[int, int]]:
+        entries = self._by_difficulty.setdefault(difficulty, [])
+        for entry in entries:
+            if bot_a not in entry.played and bot_b not in entry.played:
+                entry.played.add(bot_a)
+                entry.played.add(bot_b)
+                return entry.board, entry.start_cell
+
+        # Miss: generate a fresh board and add it to the cache.
+        start_row = self._rng.randrange(ROWS)
+        start_col = self._rng.randrange(COLS)
+        board, (start_row, start_col) = generate_solvable_board(
+            start_row, start_col, difficulty=difficulty
+        )
+        entry = _CachedBoard(
+            board=board,
+            start_cell=(start_row, start_col),
+            played={bot_a, bot_b},
+        )
+        entries.append(entry)
+        return board, (start_row, start_col)
+
+# "mixed" means sample difficulty per match from the live multiplayer
+# distribution (config.DIFFICULTY_WEIGHTS). Any other value forces that
+# specific difficulty for every match.
+MIXED_DIFFICULTY = "mixed"
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:
@@ -55,6 +109,28 @@ def _progress_line(match_no: int, total: int, ratings: dict[str, int]) -> str:
     )
 
 
+def _pick_elo_pool_pair(
+    names: list[str],
+    ratings: dict[str, int],
+    pool_size: int,
+    rng: random.Random,
+) -> tuple[str, str]:
+    """Sample a pool of *pool_size* bots, pick a random anchor from the pool,
+    then return the anchor paired with its closest-rated opponent in the pool.
+
+    Equidistant opponents are broken uniformly at random.
+    """
+    effective_pool_size = min(pool_size, len(names))
+    pool = rng.sample(names, effective_pool_size)
+    anchor = rng.choice(pool)
+    anchor_rating = ratings[anchor]
+    candidates = [n for n in pool if n != anchor]
+    min_dist = min(abs(ratings[n] - anchor_rating) for n in candidates)
+    closest = [n for n in candidates if abs(ratings[n] - anchor_rating) == min_dist]
+    opponent = rng.choice(closest)
+    return anchor, opponent
+
+
 def run_tournament(
     profiles: dict[str, BotConfig],
     rounds: int,
@@ -62,6 +138,7 @@ def run_tournament(
     *,
     seed: int | None = None,
     pairing: str = "random",
+    pool_size: int = 30,
     output: Path | None = None,
     checkpoint_interval: int = 1000,
     resume: bool = False,
@@ -72,10 +149,15 @@ def run_tournament(
     If *rounds* is 0, runs until interrupted by SIGINT/SIGTERM.
     """
     rng = random.Random(seed)
+    board_cache = _BoardCache(rng)
     names = sorted(profiles)
 
     if len(names) < 2:
         print("Need at least 2 profiles to run a tournament.", file=sys.stderr)
+        sys.exit(1)
+
+    if pairing == "elo-pool" and pool_size < 2:
+        print("--pool-size must be at least 2 for elo-pool pairing.", file=sys.stderr)
         sys.exit(1)
 
     if resume and output is not None:
@@ -87,6 +169,15 @@ def run_tournament(
     rr_pairs: list[tuple[str, str]] | None = None
     if pairing == "round-robin":
         rr_pairs = [(a, b) for a in names for b in names if a != b]
+
+    # Precompute difficulty sampler. When the user passes --difficulty mixed,
+    # each match independently samples a difficulty from the live multiplayer
+    # distribution so calibration ratings reflect actual match conditions.
+    mixed = difficulty == MIXED_DIFFICULTY
+    if mixed:
+        diff_names, diff_weights = zip(*DIFFICULTY_WEIGHTS)
+    else:
+        diff_names = diff_weights = None  # unused
 
     # SIGINT/SIGTERM handler: flush a final checkpoint and stop the loop.
     stop = {"flag": False}
@@ -115,15 +206,27 @@ def run_tournament(
                 assert rr_pairs is not None
                 idx = (r - 1) % len(rr_pairs)
                 name_a, name_b = rr_pairs[idx]
+            elif pairing == "elo-pool":
+                name_a, name_b = _pick_elo_pool_pair(names, ratings, pool_size, rng)
             else:  # random
                 name_a, name_b = rng.sample(names, 2)
 
             match_seed = rng.randint(0, 2**64)
+            match_difficulty = (
+                rng.choices(diff_names, weights=diff_weights, k=1)[0]
+                if mixed
+                else difficulty
+            )
+            board, start_cell = board_cache.get_or_generate(
+                match_difficulty, name_a, name_b
+            )
             result = simulate_match(
                 profiles[name_a],
                 profiles[name_b],
-                difficulty=difficulty,
+                difficulty=match_difficulty,
                 seed=match_seed,
+                board=board,
+                start_cell=start_cell,
             )
 
             winner_new, loser_new = compute_rating_changes(
@@ -180,15 +283,27 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--difficulty",
         type=str,
-        default="expert",
-        help="Board difficulty (default: expert)",
+        default=MIXED_DIFFICULTY,
+        choices=(MIXED_DIFFICULTY, "beginner", "intermediate", "advanced", "expert"),
+        help="Board difficulty. 'mixed' (default) samples per match from the "
+             "live multiplayer distribution (config.DIFFICULTY_WEIGHTS). "
+             "Pass a specific difficulty to force it for every match.",
     )
     parser.add_argument(
         "--pairing",
         type=str,
-        choices=("random", "round-robin"),
+        choices=("random", "round-robin", "elo-pool"),
         default="random",
-        help="Pairing strategy (default: random)",
+        help="Pairing strategy (default: random). 'elo-pool' samples a pool "
+             "of --pool-size bots per match, picks a random anchor, and pairs "
+             "it with its closest-rated opponent in the pool.",
+    )
+    parser.add_argument(
+        "--pool-size",
+        type=int,
+        default=30,
+        help="Pool size for --pairing elo-pool (default: 30). Ignored by "
+             "other pairing modes.",
     )
     parser.add_argument(
         "--seed",
@@ -237,12 +352,17 @@ def main(argv: list[str] | None = None) -> None:
 
     profiles = load_profiles(args.profiles)
     print(f"Loaded {len(profiles)} profiles")
+    if args.difficulty == MIXED_DIFFICULTY:
+        dist = ", ".join(f"{d}={int(w*100)}%" for d, w in DIFFICULTY_WEIGHTS)
+        difficulty_desc = f"mixed ({dist})"
+    else:
+        difficulty_desc = f"{args.difficulty}-only"
     if args.rounds == 0:
-        print(f"Running indefinitely on {args.difficulty} boards (pairing={args.pairing}). "
+        print(f"Running indefinitely, {difficulty_desc} boards, pairing={args.pairing}. "
               f"Send SIGINT/SIGTERM to stop.")
     else:
-        print(f"Running {args.rounds} matches on {args.difficulty} boards "
-              f"(pairing={args.pairing})...")
+        print(f"Running {args.rounds} matches, {difficulty_desc} boards, "
+              f"pairing={args.pairing}...")
 
     ratings = run_tournament(
         profiles,
@@ -250,6 +370,7 @@ def main(argv: list[str] | None = None) -> None:
         difficulty=args.difficulty,
         seed=args.seed,
         pairing=args.pairing,
+        pool_size=args.pool_size,
         output=output_path,
         checkpoint_interval=args.checkpoint_interval,
         resume=args.resume,

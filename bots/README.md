@@ -8,8 +8,13 @@ in `bots/profiles.json`. Matches run in-process via `bots.simulator.simulate_mat
 
 Bots are paired **randomly** by default. Standard ELO math handles rating
 disparity on its own (the expected-score term shrinks the point swing for
-lopsided matches), so there is no need for a dedicated bot matchmaking system.
-Just let it run.
+lopsided matches), so random pairing converges correctly given enough matches.
+
+If you want faster convergence or tighter calibration between close-rated
+bots, pass `--pairing elo-pool`. Each match samples `--pool-size` bots
+(default 30), picks a random anchor from the pool, and pairs it with its
+closest-rated opponent in the pool. This concentrates matches between
+similarly-rated bots without maintaining any persistent queue state.
 
 ## Running the simulation
 
@@ -74,10 +79,11 @@ Stop it: `kill $(cat bots/tournament.pid)`
 |---|---|---|
 | `--rounds N` | `200` | Number of matches to play. `0` = infinite (stops on signal). |
 | `--output PATH` | — | JSON file for ratings. Required for `--resume` and for `--rounds 0`. |
-| `--pairing {random,round-robin}` | `random` | Random samples two distinct bots per match; round-robin cycles all 384×383 ordered pairs deterministically. |
+| `--pairing {random,round-robin,elo-pool}` | `random` | `random` samples two distinct bots per match; `round-robin` cycles all 384×383 ordered pairs deterministically; `elo-pool` samples a pool of `--pool-size` bots per match, picks a random anchor, and pairs it with its closest-rated opponent in the pool. |
+| `--pool-size N` | `30` | Pool size for `--pairing elo-pool`. Ignored by other pairing modes. |
 | `--checkpoint-interval N` | `1000` | Atomically writes `--output` every N matches. `0` to disable. |
 | `--resume` | off | Load existing `--output` as starting ratings instead of seeding at `DEFAULT_RATING`. |
-| `--difficulty {beginner,intermediate,advanced,expert}` | `expert` | Board difficulty. |
+| `--difficulty {mixed,beginner,intermediate,advanced,expert}` | `mixed` | `mixed` samples a difficulty per match from the live multiplayer distribution in `config.DIFFICULTY_WEIGHTS` (currently beginner 10% / intermediate 40% / advanced 40% / expert 10%). Passing a specific difficulty forces it for every match. |
 | `--seed N` | random | Seed the RNG for reproducibility. |
 | `-v / --verbose` | off | Print every match result (noisy). |
 | `--leaderboard-limit N` | all | Only print top N in the final leaderboard. |
@@ -105,10 +111,14 @@ The seed script:
    win/loss counters.
 3. Is idempotent. Safe to re-run after every calibration pass.
 
-## Known performance caveat
+## Board cache
 
-`board_generator.generate_solvable_board` is the bottleneck — expert boards
-can take several seconds each to generate, so running millions of matches
-is not practical on the current code. For high-throughput calibration the
-next step would be a board cache inside `simulate_match()` that reuses
-generated boards across matches.
+`board_generator.generate_solvable_board` is the main cost driver — expert
+boards can take several seconds each to generate. `run_tournament` keeps a
+per-run in-memory cache of generated boards keyed by difficulty. Each cached
+entry tracks which bots have already played on it; a lookup returns the
+first board where *neither* bot in the pending match has played before, so
+no two bots ever face the same `(board, start_cell)` twice. On miss a fresh
+board is generated and added to the cache. The cache is unbounded —
+entries naturally retire once nearly every bot in the roster has played
+them.
