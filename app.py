@@ -48,6 +48,8 @@ def create_app():
         bot_registry.load()
         from bots.lifecycle import start_lifecycle_loops
         start_lifecycle_loops()
+        from bots.queue_injector import start_queue_injector
+        start_queue_injector()
 
     return app
 
