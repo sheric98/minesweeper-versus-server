@@ -120,6 +120,16 @@ def send_invite():
             return jsonify({"matchId": result["match_id"]})
 
     invite_id = invite_store.create(g.username, target)
+
+    # If the target is a bot, schedule a delayed bot response. The bot
+    # will take the same `invite_store.respond` → `match_manager.create_match`
+    # path a human clicking "Accept" would hit, so the inviter's normal
+    # invite-polling flow surfaces the resulting match unchanged.
+    from bots.registry import bot_registry
+    if bot_registry.is_bot(target):
+        from bots.invite_responder import schedule_bot_response
+        schedule_bot_response(invite_id, target)
+
     return jsonify({"inviteId": invite_id})
 
 
