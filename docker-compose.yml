@@ -19,6 +19,14 @@ services:
     ports:
       - "5000:5000"
     env_file: .env
+    environment:
+      # Persist the bot UUID mapping across container rebuilds. The bot
+      # registry hard-fails if this file is missing, so seed_elo (run from
+      # entrypoint.sh when BOTS_ENABLED=1) must create it before gunicorn
+      # starts.
+      BOT_USER_IDS_PATH: /var/lib/minesweeper/bot_state/user_ids.json
+    volumes:
+      - bot_state:/var/lib/minesweeper/bot_state
     depends_on:
       db:
         condition: service_healthy
@@ -26,3 +34,4 @@ services:
 
 volumes:
   postgres_data:
+  bot_state:

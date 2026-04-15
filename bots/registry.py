@@ -13,6 +13,7 @@ first.
 from __future__ import annotations
 
 import json
+import os
 import random
 import threading
 from dataclasses import dataclass
@@ -23,7 +24,12 @@ from .config import BotConfig, load_profiles
 
 DEFAULT_PROFILES_PATH = Path(__file__).parent / "profiles.json"
 DEFAULT_RATINGS_PATH = Path(__file__).parent / "ratings.json"
-DEFAULT_USER_IDS_PATH = Path(__file__).parent / "user_ids.json"
+# `BOT_USER_IDS_PATH` allows pointing at a persistent volume in prod so the
+# seeded UUID mapping survives container rebuilds. Falls back to the
+# source-tree location used in dev and tests.
+DEFAULT_USER_IDS_PATH = Path(
+    os.getenv("BOT_USER_IDS_PATH") or (Path(__file__).parent / "user_ids.json")
+)
 
 
 @dataclass(frozen=True)

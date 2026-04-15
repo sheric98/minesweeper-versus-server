@@ -2,12 +2,20 @@
 
 Reads a ratings JSON file produced by `bots.tournament`, ensures a `users`
 row exists for each bot (creating one and persisting its UUID in
-`bots/user_ids.json`), then upserts each bot's calibrated rating into
-`elo_ratings`. Idempotent: safe to re-run after re-calibration.
+`bots/user_ids.json`), then writes each bot's calibrated rating into
+`elo_ratings`. Idempotent: safe to re-run.
+
+By default, only bots that don't already have an `elo_ratings` row get
+one — existing rows are left untouched so live-game ELO drift is
+preserved across server restarts (this script runs on every container
+boot from entrypoint.sh when BOTS_ENABLED=1). Pass `--force` to overwrite
+stored ratings with the calibrated values, e.g. after re-running the
+tournament.
 
 Usage:
-    python -m bots.seed_elo --ratings bots/ratings.json --dry-run
-    python -m bots.seed_elo --ratings bots/ratings.json
+    python -m bots.seed_elo --dry-run
+    python -m bots.seed_elo                    # insert-if-missing
+    python -m bots.seed_elo --force            # recalibration: overwrite
 
 Requires DATABASE_URL to be set (same env var as the Flask app).
 """
@@ -25,7 +33,9 @@ from .config import load_profiles
 
 DEFAULT_RATINGS_PATH = "bots/ratings.json"
 DEFAULT_PROFILES_PATH = "bots/profiles.json"
-DEFAULT_USER_IDS_PATH = "bots/user_ids.json"
+# Honors `BOT_USER_IDS_PATH` so containerized deploys can point this at a
+# persistent volume (see docker-compose.yml).
+DEFAULT_USER_IDS_PATH = os.getenv("BOT_USER_IDS_PATH") or "bots/user_ids.json"
 
 
 def _load_json(path: Path) -> dict:
@@ -46,6 +56,7 @@ def seed(
     profiles_path: Path,
     user_ids_path: Path,
     dry_run: bool,
+    force: bool,
 ) -> None:
     ratings = _load_json(ratings_path)
     if not ratings:
@@ -69,6 +80,10 @@ def seed(
     print(f"Planning to seed {len(to_process)} bot ratings.")
     print(f"  {sum(1 for n, _ in to_process if n not in user_ids)} need new users rows.")
     print(f"  {sum(1 for n, _ in to_process if n in user_ids)} already have user_ids.")
+    print(
+        f"  mode: {'forced overwrite' if force else 'insert-if-missing'}"
+        f" (live ELO preserved for existing rows unless --force)"
+    )
 
     if dry_run:
         print("\n-- DRY RUN --")
@@ -103,6 +118,18 @@ def seed(
                     if cur.fetchone() is not None:
                         continue
                     # Stale mapping — fall through and re-create.
+                # Mapping file may have been wiped (fresh volume) while the DB
+                # still holds the row from a previous seed. Recover the UUID
+                # by display_name before falling through to INSERT, so we
+                # never create duplicate users for the same bot.
+                cur.execute(
+                    "SELECT id FROM users WHERE display_name = %s",
+                    (profiles[name].username,),
+                )
+                existing = cur.fetchone()
+                if existing is not None:
+                    user_ids[name] = str(existing[0])
+                    continue
                 cur.execute(
                     "INSERT INTO users (display_name) VALUES (%s) RETURNING id",
                     (profiles[name].username,),
@@ -111,27 +138,41 @@ def seed(
                 user_ids[name] = str(new_id)
                 new_count += 1
 
-            # 2. Upsert elo_ratings (leave wins/losses alone).
-            for name, rating in to_process:
-                uid = user_ids[name]
-                cur.execute(
-                    """
+            # 2. Insert elo_ratings for bots that don't have a row yet.
+            #    Without --force, existing rows are left alone so live-game
+            #    ELO drift survives the on-boot seed run in entrypoint.sh.
+            #    With --force, recalibrated ratings from bots/ratings.json
+            #    overwrite whatever is currently stored (wins/losses are
+            #    always left untouched).
+            if force:
+                insert_sql = """
                     INSERT INTO elo_ratings (user_id, rating)
                     VALUES (%s, %s)
                     ON CONFLICT (user_id) DO UPDATE
                       SET rating = EXCLUDED.rating,
                           updated_at = now()
-                    """,
-                    (uid, rating),
-                )
+                """
+            else:
+                insert_sql = """
+                    INSERT INTO elo_ratings (user_id, rating)
+                    VALUES (%s, %s)
+                    ON CONFLICT (user_id) DO NOTHING
+                """
+            rating_writes = 0
+            for name, rating in to_process:
+                uid = user_ids[name]
+                cur.execute(insert_sql, (uid, rating))
+                rating_writes += cur.rowcount
         conn.commit()
     finally:
         conn.close()
 
     _save_user_ids(user_ids_path, user_ids)
+    mode = "forced overwrite" if force else "insert-if-missing"
     print(
-        f"Seeded {len(to_process)} ratings "
-        f"({new_count} new users, {len(to_process) - new_count} updated)."
+        f"Seeded {len(to_process)} bots ({mode}): "
+        f"{new_count} new users, {rating_writes} rating rows written, "
+        f"{len(to_process) - rating_writes} left untouched."
     )
     print(f"User ID mapping written to {user_ids_path}")
 
@@ -148,6 +189,15 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Print planned changes without writing to the database",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Overwrite existing elo_ratings rows with the calibrated rating "
+            "from bots/ratings.json. Default behavior only inserts rows for "
+            "bots that don't yet have one, preserving live-game ELO drift."
+        ),
+    )
     args = parser.parse_args(argv)
 
     seed(
@@ -155,6 +205,7 @@ def main(argv: list[str] | None = None) -> None:
         profiles_path=Path(args.profiles),
         user_ids_path=Path(args.user_ids),
         dry_run=args.dry_run,
+        force=args.force,
     )
 
 

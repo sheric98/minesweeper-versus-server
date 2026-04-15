@@ -21,6 +21,7 @@ JWT_SECRET=$JWT_SECRET
 CORS_ORIGINS=$CORS_ORIGINS
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 DATABASE_URL=postgresql://minesweeper:${POSTGRES_PASSWORD}@db:5432/minesweeper
+BOTS_ENABLED=1
 EOF
 chown ubuntu:ubuntu /home/ubuntu/.env.minesweeper
 chmod 600 /home/ubuntu/.env.minesweeper
@@ -29,6 +30,12 @@ chmod 600 /home/ubuntu/.env.minesweeper
 cd /home/ubuntu
 git clone "$GIT_REPO" minesweeper-web-server
 chown -R ubuntu:ubuntu minesweeper-web-server
+# Propagate the production env file into the compose project root so
+# docker-compose's `env_file: .env` picks it up (same step redeploy.sh runs
+# on subsequent deploys).
+cp /home/ubuntu/.env.minesweeper /home/ubuntu/minesweeper-web-server/.env
+chown ubuntu:ubuntu /home/ubuntu/minesweeper-web-server/.env
+chmod 600 /home/ubuntu/minesweeper-web-server/.env
 ./minesweeper-web-server/.deploy.sh
 
 # Nginx config
