@@ -82,6 +82,7 @@ class BotRunner:
         self.done: bool = False
         self.won: bool = False
         self._finished_at: float | None = None
+        self._sent_initial_reveal: bool = False
 
     @property
     def finished(self) -> bool:
@@ -94,6 +95,13 @@ class BotRunner:
         the runner wants to be stepped again, False once it is finished."""
         if self.done:
             return False
+
+        # Emit the starting-square flood-fill on the first step, mirroring
+        # the reveal message a human client sends on its first click.
+        if not self._sent_initial_reveal:
+            self._sent_initial_reveal = True
+            if self.brain.initial_reveal:
+                self.transport.send_reveal(list(self.brain.initial_reveal))
 
         cell = self.brain.next_move()
         if cell is None:

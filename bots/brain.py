@@ -79,7 +79,10 @@ class BotBrain:
         # Seed from the match's starting square — treat exactly like a reveal.
         # `_pending_reveal` must exist before _apply_reveal runs.
         self._pending_reveal: dict[Cell, int] = {}
-        self._apply_reveal(start_cell)
+        initial = self._apply_reveal(start_cell)
+        # Snapshot the starting cascade so the runner can emit it over the
+        # transport on the first step (mirroring a human's first-click reveal).
+        self.initial_reveal: list[Cell] = list(initial.keys())
 
     # ------------------------------------------------------------------ API
 
