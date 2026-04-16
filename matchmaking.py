@@ -88,6 +88,31 @@ invite_store = InviteStore()
 @require_auth
 def get_players():
     players = tracker.get_active_players(exclude=g.username)
+
+    # Enrich with ELO ratings so every player shows their rating
+    from config import DATABASE_URL
+    if DATABASE_URL and players:
+        from db import get_conn
+        usernames = [p["username"] for p in players]
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT u.display_name, e.rating
+                    FROM elo_ratings e
+                    JOIN users u ON u.id = e.user_id
+                    WHERE u.display_name = ANY(%s)
+                    """,
+                    (usernames,),
+                )
+                rating_map = {r[0]: r[1] for r in cur.fetchall()}
+        finally:
+            conn.close()
+        for p in players:
+            if p["username"] in rating_map:
+                p["rating"] = rating_map[p["username"]]
+
     return jsonify({"players": players})
 
 
