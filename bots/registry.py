@@ -66,9 +66,12 @@ class BotRegistry:
                 )
 
             profiles = load_profiles(profiles_path)
-            ratings: dict[str, int] = {
-                k: int(v) for k, v in json.loads(ratings_path.read_text()).items()
-            }
+            raw = json.loads(ratings_path.read_text())
+            # Support both old flat format {name: rating} and new nested
+            # format {"ratings": {...}, "stats": {...}}.
+            if "ratings" in raw and isinstance(raw.get("ratings"), dict):
+                raw = raw["ratings"]
+            ratings: dict[str, int] = {k: int(v) for k, v in raw.items()}
             user_ids: dict[str, str] = json.loads(user_ids_path.read_text())
 
             by_username: dict[str, BotEntry] = {}

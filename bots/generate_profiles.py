@@ -14,10 +14,10 @@ GUESS_OPTIONS = {
 }
 
 SPEEDS = {
-    "lightning": (0.5, 2.0),
-    "fast":      (0.5, 2.5),
-    "medium":    (1.0, 3.0),
-    "slow":      (1.0, 4.0),
+    "lightning": (0.3, 0.5),
+    "fast":      (0.38, 0.58),
+    "medium":    (0.48, 0.68),
+    "slow":      (0.62, 0.82),
 }
 
 MISTAKE_FIELDS = [

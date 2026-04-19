@@ -30,6 +30,43 @@ from .simulator import simulate_match
 
 
 @dataclass
+class BotStats:
+    wins: int = 0
+    losses: int = 0
+    total_win_time_ms: int = 0
+    min_win_time_ms: int | None = None
+
+    @property
+    def avg_win_time_ms(self) -> float:
+        return self.total_win_time_ms / self.wins if self.wins else 0.0
+
+    def record_win(self, time_ms: int) -> None:
+        self.wins += 1
+        self.total_win_time_ms += time_ms
+        if self.min_win_time_ms is None or time_ms < self.min_win_time_ms:
+            self.min_win_time_ms = time_ms
+
+    def to_dict(self) -> dict:
+        d: dict = {
+            "wins": self.wins,
+            "losses": self.losses,
+            "total_win_time_ms": self.total_win_time_ms,
+        }
+        if self.min_win_time_ms is not None:
+            d["min_win_time_ms"] = self.min_win_time_ms
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> BotStats:
+        return cls(
+            wins=d.get("wins", 0),
+            losses=d.get("losses", 0),
+            total_win_time_ms=d.get("total_win_time_ms", 0),
+            min_win_time_ms=d.get("min_win_time_ms"),
+        )
+
+
+@dataclass
 class _CachedBoard:
     board: list[list[dict]]
     start_cell: tuple[int, int]
@@ -86,14 +123,38 @@ def _atomic_write_json(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _load_ratings(path: Path, names: list[str]) -> dict[str, int]:
+def load_ratings_file(path: Path) -> tuple[dict[str, int], dict[str, dict]]:
+    """Load a ratings JSON file, handling both old flat and new nested formats.
+
+    Returns (ratings_dict, stats_dict) where stats_dict values are raw dicts.
+    """
+    if not path.exists():
+        return {}, {}
+    loaded = json.loads(path.read_text())
+    if "ratings" in loaded and isinstance(loaded.get("ratings"), dict):
+        ratings = {k: int(v) for k, v in loaded["ratings"].items()}
+        stats = loaded.get("stats", {})
+    else:
+        # Old flat format: {name: rating_int}
+        ratings = {k: int(v) for k, v in loaded.items()}
+        stats = {}
+    return ratings, stats
+
+
+def _load_ratings(
+    path: Path, names: list[str]
+) -> tuple[dict[str, int], dict[str, BotStats]]:
     ratings: dict[str, int] = {n: DEFAULT_RATING for n in names}
+    stats: dict[str, BotStats] = {n: BotStats() for n in names}
     if path.exists():
-        loaded = json.loads(path.read_text())
-        for k, v in loaded.items():
+        loaded_ratings, loaded_stats = load_ratings_file(path)
+        for k, v in loaded_ratings.items():
             if k in ratings:
-                ratings[k] = int(v)
-    return ratings
+                ratings[k] = v
+        for k, v in loaded_stats.items():
+            if k in stats:
+                stats[k] = BotStats.from_dict(v)
+    return ratings, stats
 
 
 def _progress_line(match_no: int, total: int, ratings: dict[str, int]) -> str:
@@ -143,8 +204,8 @@ def run_tournament(
     checkpoint_interval: int = 1000,
     resume: bool = False,
     verbose: bool = False,
-) -> dict[str, int]:
-    """Run *rounds* matches among *profiles* and return final ratings.
+) -> tuple[dict[str, int], dict[str, BotStats]]:
+    """Run *rounds* matches among *profiles* and return final ratings and stats.
 
     If *rounds* is 0, runs until interrupted by SIGINT/SIGTERM.
     """
@@ -161,9 +222,10 @@ def run_tournament(
         sys.exit(1)
 
     if resume and output is not None:
-        ratings = _load_ratings(output, names)
+        ratings, stats = _load_ratings(output, names)
     else:
         ratings = {n: DEFAULT_RATING for n in names}
+        stats = {n: BotStats() for n in names}
 
     # Precompute round-robin pair list only if needed.
     rr_pairs: list[tuple[str, str]] | None = None
@@ -190,7 +252,10 @@ def run_tournament(
 
     def _checkpoint() -> None:
         if output is not None:
-            _atomic_write_json(output, ratings)
+            _atomic_write_json(output, {
+                "ratings": ratings,
+                "stats": {n: s.to_dict() for n, s in stats.items()},
+            })
 
     infinite = rounds == 0
     r = 0
@@ -235,6 +300,9 @@ def run_tournament(
             ratings[result.winner] = winner_new
             ratings[result.loser] = loser_new
 
+            stats[result.winner].record_win(result.time_winner_ms)
+            stats[result.loser].losses += 1
+
             if verbose:
                 print(
                     f"[{r:>6}] {result.winner} beat {result.loser}  "
@@ -250,20 +318,49 @@ def run_tournament(
     finally:
         _checkpoint()
 
-    return ratings
+    return ratings, stats
 
 
-def print_leaderboard(ratings: dict[str, int], limit: int | None = None) -> None:
+def print_leaderboard(
+    ratings: dict[str, int],
+    stats: dict[str, BotStats] | None = None,
+    limit: int | None = None,
+) -> None:
     ranked = sorted(ratings.items(), key=lambda x: x[1], reverse=True)
     if limit is not None:
         ranked = ranked[:limit]
-    print()
-    print("=" * 46)
-    print(f"{'Rank':<6}{'Bot':<34}{'ELO':>6}")
-    print("-" * 46)
-    for i, (name, elo) in enumerate(ranked, 1):
-        print(f"{i:<6}{name:<34}{elo:>6}")
-    print("=" * 46)
+    has_stats = stats is not None and any(
+        s.wins + s.losses > 0 for s in stats.values()
+    )
+    if has_stats:
+        width = 90
+        print()
+        print("=" * width)
+        print(
+            f"{'Rank':<6}{'Bot':<28}{'ELO':>6}  "
+            f"{'W':>5} {'L':>5} {'Win%':>6} {'AvgWin':>8} {'MinWin':>8}"
+        )
+        print("-" * width)
+        for i, (name, elo) in enumerate(ranked, 1):
+            s = stats.get(name, BotStats())
+            total = s.wins + s.losses
+            win_pct = (s.wins / total * 100) if total else 0.0
+            avg_win = f"{s.avg_win_time_ms:.0f}ms" if s.wins else "-"
+            min_win = f"{s.min_win_time_ms}ms" if s.min_win_time_ms is not None else "-"
+            print(
+                f"{i:<6}{name:<28}{elo:>6}  "
+                f"{s.wins:>5} {s.losses:>5} {win_pct:>5.1f}% {avg_win:>8} {min_win:>8}"
+            )
+        print("=" * width)
+    else:
+        width = 46
+        print()
+        print("=" * width)
+        print(f"{'Rank':<6}{'Bot':<34}{'ELO':>6}")
+        print("-" * width)
+        for i, (name, elo) in enumerate(ranked, 1):
+            print(f"{i:<6}{name:<34}{elo:>6}")
+        print("=" * width)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -364,7 +461,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Running {args.rounds} matches, {difficulty_desc} boards, "
               f"pairing={args.pairing}...")
 
-    ratings = run_tournament(
+    ratings, stats = run_tournament(
         profiles,
         rounds=args.rounds,
         difficulty=args.difficulty,
@@ -377,7 +474,7 @@ def main(argv: list[str] | None = None) -> None:
         verbose=args.verbose,
     )
 
-    print_leaderboard(ratings, limit=args.leaderboard_limit)
+    print_leaderboard(ratings, stats=stats, limit=args.leaderboard_limit)
 
     if output_path is not None:
         print(f"\nRatings written to {output_path}")

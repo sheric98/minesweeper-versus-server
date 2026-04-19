@@ -12,6 +12,15 @@ boot from entrypoint.sh when BOTS_ENABLED=1). Pass `--force` to overwrite
 stored ratings with the calibrated values, e.g. after re-running the
 tournament.
 
+When the ratings file is in the nested `{"ratings": ..., "stats": ...}`
+format produced by `bots.tournament`, per-bot `wins`/`losses` from the
+stats block are also written:
+  * insert-if-missing: W/L are seeded on the new row (default 0 if the
+    stats block doesn't have this bot).
+  * --force: W/L are overwritten alongside the rating, but only for
+    bots present in the stats block. Bots missing from stats keep their
+    existing W/L untouched.
+
 Usage:
     python -m bots.seed_elo --dry-run
     python -m bots.seed_elo                    # insert-if-missing
@@ -58,7 +67,15 @@ def seed(
     dry_run: bool,
     force: bool,
 ) -> None:
-    ratings = _load_json(ratings_path)
+    raw = _load_json(ratings_path)
+    # Support both old flat format {name: rating} and new nested
+    # format {"ratings": {...}, "stats": {...}}.
+    if "ratings" in raw and isinstance(raw.get("ratings"), dict):
+        ratings = raw["ratings"]
+        stats = raw.get("stats") or {}
+    else:
+        ratings = raw
+        stats = {}
     if not ratings:
         print(f"No ratings found in {ratings_path}", file=sys.stderr)
         sys.exit(1)
@@ -74,12 +91,22 @@ def seed(
             file=sys.stderr,
         )
 
-    to_process = [(name, int(r)) for name, r in ratings.items() if name in profiles]
+    def _wl(name: str) -> tuple[int, int] | None:
+        s = stats.get(name)
+        if not isinstance(s, dict) or "wins" not in s or "losses" not in s:
+            return None
+        return int(s["wins"]), int(s["losses"])
+
+    to_process = [
+        (name, int(r), _wl(name)) for name, r in ratings.items() if name in profiles
+    ]
     to_process.sort(key=lambda x: -x[1])
 
+    with_stats = sum(1 for _, _, wl in to_process if wl is not None)
     print(f"Planning to seed {len(to_process)} bot ratings.")
-    print(f"  {sum(1 for n, _ in to_process if n not in user_ids)} need new users rows.")
-    print(f"  {sum(1 for n, _ in to_process if n in user_ids)} already have user_ids.")
+    print(f"  {sum(1 for n, _, _ in to_process if n not in user_ids)} need new users rows.")
+    print(f"  {sum(1 for n, _, _ in to_process if n in user_ids)} already have user_ids.")
+    print(f"  {with_stats} carry calibration wins/losses from stats block.")
     print(
         f"  mode: {'forced overwrite' if force else 'insert-if-missing'}"
         f" (live ELO preserved for existing rows unless --force)"
@@ -87,10 +114,11 @@ def seed(
 
     if dry_run:
         print("\n-- DRY RUN --")
-        for name, rating in to_process[:10]:
+        for name, rating, wl in to_process[:10]:
             uid = user_ids.get(name, "<new>")
+            wl_str = f"{wl[0]}W/{wl[1]}L" if wl else "no-stats"
             print(f"  {name:<34} display={profiles[name].username:<20} "
-                  f"rating={rating:>5} user_id={uid}")
+                  f"rating={rating:>5} {wl_str:<12} user_id={uid}")
         if len(to_process) > 10:
             print(f"  ... and {len(to_process) - 10} more")
         return
@@ -108,7 +136,7 @@ def seed(
         with conn.cursor() as cur:
             # 1. Ensure users rows exist for all bots and capture UUIDs.
             new_count = 0
-            for name, _rating in to_process:
+            for name, _rating, _wl in to_process:
                 if name in user_ids:
                     # Verify the row still exists (DB may have been reset).
                     cur.execute(
@@ -141,27 +169,43 @@ def seed(
             # 2. Insert elo_ratings for bots that don't have a row yet.
             #    Without --force, existing rows are left alone so live-game
             #    ELO drift survives the on-boot seed run in entrypoint.sh.
-            #    With --force, recalibrated ratings from bots/ratings.json
-            #    overwrite whatever is currently stored (wins/losses are
-            #    always left untouched).
-            if force:
-                insert_sql = """
-                    INSERT INTO elo_ratings (user_id, rating)
-                    VALUES (%s, %s)
-                    ON CONFLICT (user_id) DO UPDATE
-                      SET rating = EXCLUDED.rating,
-                          updated_at = now()
-                """
-            else:
-                insert_sql = """
-                    INSERT INTO elo_ratings (user_id, rating)
-                    VALUES (%s, %s)
-                    ON CONFLICT (user_id) DO NOTHING
-                """
+            #    With --force, recalibrated ratings overwrite whatever is
+            #    currently stored. If the ratings file carries a `stats`
+            #    block, calibration W/L from it are written too (on insert
+            #    always, on --force update only when stats exist for the
+            #    bot — otherwise existing W/L are preserved).
+            insert_missing_sql = """
+                INSERT INTO elo_ratings (user_id, rating, wins, losses)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (user_id) DO NOTHING
+            """
+            force_with_wl_sql = """
+                INSERT INTO elo_ratings (user_id, rating, wins, losses)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE
+                  SET rating = EXCLUDED.rating,
+                      wins = EXCLUDED.wins,
+                      losses = EXCLUDED.losses,
+                      updated_at = now()
+            """
+            force_rating_only_sql = """
+                INSERT INTO elo_ratings (user_id, rating, wins, losses)
+                VALUES (%s, %s, 0, 0)
+                ON CONFLICT (user_id) DO UPDATE
+                  SET rating = EXCLUDED.rating,
+                      updated_at = now()
+            """
             rating_writes = 0
-            for name, rating in to_process:
+            for name, rating, wl in to_process:
                 uid = user_ids[name]
-                cur.execute(insert_sql, (uid, rating))
+                wins, losses = wl if wl is not None else (0, 0)
+                if force:
+                    if wl is not None:
+                        cur.execute(force_with_wl_sql, (uid, rating, wins, losses))
+                    else:
+                        cur.execute(force_rating_only_sql, (uid, rating))
+                else:
+                    cur.execute(insert_missing_sql, (uid, rating, wins, losses))
                 rating_writes += cur.rowcount
         conn.commit()
     finally:
