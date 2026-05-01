@@ -99,10 +99,10 @@ def get_players():
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT u.display_name, e.rating
+                    SELECT u.username, e.rating
                     FROM elo_ratings e
                     JOIN users u ON u.id = e.user_id
-                    WHERE u.display_name = ANY(%s)
+                    WHERE u.username = ANY(%s)
                     """,
                     (usernames,),
                 )

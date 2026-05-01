@@ -13,10 +13,38 @@ def init_db():
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    display_name VARCHAR(20) NOT NULL,
+                    username VARCHAR(20) NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    CONSTRAINT users_username_unique UNIQUE (username)
                 );
+
+                -- Migration: rename display_name -> username (idempotent).
+                -- Pre-existing prod databases were created with a single
+                -- `display_name` column; this block backfills the new
+                -- `username` column from it and drops the old one.
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(20);
+
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = 'display_name'
+                    ) THEN
+                        UPDATE users SET username = display_name WHERE username IS NULL;
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'users_username_unique'
+                    ) THEN
+                        ALTER TABLE users
+                        ADD CONSTRAINT users_username_unique UNIQUE (username);
+                    END IF;
+                END $$;
+
+                ALTER TABLE users ALTER COLUMN username SET NOT NULL;
+                ALTER TABLE users DROP COLUMN IF EXISTS display_name;
 
                 CREATE TABLE IF NOT EXISTS oauth_credentials (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

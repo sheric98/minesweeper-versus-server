@@ -69,13 +69,14 @@ def google_auth():
     body = request.get_json(silent=True) or {}
     google_id = body.get("google_id", "")
     email = body.get("email", "")
-    display_name = body.get("display_name", "")
+    # `display_name` here is the Google profile name we use as a seed for
+    # the user's username on first sign-in — not a separate persisted field.
+    google_name = body.get("display_name", "")
 
     if not google_id or not email:
         return jsonify({"error": "google_id and email are required"}), 400
 
-    # Sanitize display_name
-    sanitized = re.sub(r"[^a-zA-Z0-9_]", "", display_name)[:20]
+    sanitized = re.sub(r"[^a-zA-Z0-9_]", "", google_name)[:20]
     if not sanitized:
         sanitized = "Player"
 
@@ -91,7 +92,7 @@ def google_auth():
         with conn.cursor() as cur:
             # Look up existing oauth credential
             cur.execute(
-                "SELECT oc.user_id, u.display_name FROM oauth_credentials oc "
+                "SELECT oc.user_id, u.username FROM oauth_credentials oc "
                 "JOIN users u ON u.id = oc.user_id "
                 "WHERE oc.provider = 'google' AND oc.provider_id = %s",
                 (google_id,)
@@ -102,11 +103,11 @@ def google_auth():
                 token = create_jwt(existing_name, user_id=user_id)
                 return jsonify({"token": token})
 
-            # New user — handle name collisions
+            # New user — handle username collisions
             final_name = sanitized
             suffix = 1
             while True:
-                cur.execute("SELECT 1 FROM users WHERE display_name = %s", (final_name,))
+                cur.execute("SELECT 1 FROM users WHERE username = %s", (final_name,))
                 if not cur.fetchone():
                     break
                 final_name = f"{sanitized[:18]}_{suffix}"
@@ -114,7 +115,7 @@ def google_auth():
 
             # Insert user + credential
             cur.execute(
-                "INSERT INTO users (display_name) VALUES (%s) RETURNING id",
+                "INSERT INTO users (username) VALUES (%s) RETURNING id",
                 (final_name,)
             )
             user_id = str(cur.fetchone()[0])

@@ -31,7 +31,7 @@ def get_head_to_head():
 
 
 def _get_single_record(cur, user_id, opponent_name):
-    cur.execute("SELECT id FROM users WHERE display_name = %s", (opponent_name,))
+    cur.execute("SELECT id FROM users WHERE username = %s", (opponent_name,))
     row = cur.fetchone()
     if not row:
         return jsonify({"error": "Opponent not found"}), 404
@@ -70,7 +70,7 @@ def _get_all_records(cur, user_id, page, page_size, search):
     params = [user_id, user_id]
 
     if search:
-        base_query += " AND CASE WHEN h.player1_id = %s THEN u2.display_name ELSE u1.display_name END ILIKE %s"
+        base_query += " AND CASE WHEN h.player1_id = %s THEN u2.username ELSE u1.username END ILIKE %s"
         params.extend([user_id, f"%{search}%"])
 
     cur.execute("SELECT COUNT(*) " + base_query, params)
@@ -79,7 +79,7 @@ def _get_all_records(cur, user_id, page, page_size, search):
     offset = (page - 1) * page_size
     cur.execute("""
         SELECT
-            CASE WHEN h.player1_id = %s THEN u2.display_name ELSE u1.display_name END AS opponent,
+            CASE WHEN h.player1_id = %s THEN u2.username ELSE u1.username END AS opponent,
             CASE WHEN h.player1_id = %s THEN h.player1_wins ELSE h.player2_wins END AS wins,
             CASE WHEN h.player1_id = %s THEN h.player2_wins ELSE h.player1_wins END AS losses,
             (h.player1_wins + h.player2_wins) AS total_games

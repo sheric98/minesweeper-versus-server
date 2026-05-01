@@ -43,7 +43,7 @@ def get_elo_leaderboard():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT u.display_name, e.rating, e.wins, e.losses
+                SELECT u.username, e.rating, e.wins, e.losses
                 FROM elo_ratings e
                 JOIN users u ON u.id = e.user_id
                 ORDER BY e.rating DESC

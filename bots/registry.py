@@ -34,8 +34,7 @@ DEFAULT_USER_IDS_PATH = Path(
 
 @dataclass(frozen=True)
 class BotEntry:
-    username: str       # human-facing handle; matches session tracker keys
-    display_name: str   # same as username — what the DB stores in users.display_name
+    username: str       # human-facing handle; matches session tracker keys and users.username
     user_id: str        # UUID from bots/user_ids.json (persistent across restarts)
     profile_name: str   # systematic id, e.g. "perfect_deep_slow_wrs"
     cfg: BotConfig
@@ -92,7 +91,6 @@ class BotRegistry:
                     )
                 by_username[cfg.username] = BotEntry(
                     username=cfg.username,
-                    display_name=cfg.username,
                     user_id=uid,
                     profile_name=profile_name,
                     cfg=cfg,

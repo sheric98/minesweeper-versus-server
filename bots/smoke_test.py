@@ -70,7 +70,7 @@ def _snapshot_h2h(cur, a_id: str, b_id: str) -> dict:
 
 def _top_leaderboard(cur, limit: int = 10) -> list[tuple[str, int]]:
     cur.execute(
-        "SELECT u.display_name, e.rating "
+        "SELECT u.username, e.rating "
         "FROM elo_ratings e JOIN users u ON u.id = e.user_id "
         "ORDER BY e.rating DESC LIMIT %s",
         (limit,),

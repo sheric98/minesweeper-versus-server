@@ -28,7 +28,7 @@ def get_leaderboard():
                 if difficulty not in valid_difficulties:
                     difficulty = "expert"
                 cur.execute(
-                    "SELECT u.display_name, ls.time_seconds, ls.created_at "
+                    "SELECT u.username, ls.time_seconds, ls.created_at "
                     "FROM leaderboard_scores ls "
                     "JOIN users u ON u.id = ls.user_id "
                     "WHERE ls.mode = %s AND ls.difficulty = %s "
@@ -38,7 +38,7 @@ def get_leaderboard():
                 )
             else:
                 cur.execute(
-                    "SELECT u.display_name, ls.time_seconds, ls.created_at "
+                    "SELECT u.username, ls.time_seconds, ls.created_at "
                     "FROM leaderboard_scores ls "
                     "JOIN users u ON u.id = ls.user_id "
                     "WHERE ls.mode = %s "

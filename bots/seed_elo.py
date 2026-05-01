@@ -117,7 +117,7 @@ def seed(
         for name, rating, wl in to_process[:10]:
             uid = user_ids.get(name, "<new>")
             wl_str = f"{wl[0]}W/{wl[1]}L" if wl else "no-stats"
-            print(f"  {name:<34} display={profiles[name].username:<20} "
+            print(f"  {name:<34} username={profiles[name].username:<20} "
                   f"rating={rating:>5} {wl_str:<12} user_id={uid}")
         if len(to_process) > 10:
             print(f"  ... and {len(to_process) - 10} more")
@@ -148,10 +148,10 @@ def seed(
                     # Stale mapping — fall through and re-create.
                 # Mapping file may have been wiped (fresh volume) while the DB
                 # still holds the row from a previous seed. Recover the UUID
-                # by display_name before falling through to INSERT, so we
+                # by username before falling through to INSERT, so we
                 # never create duplicate users for the same bot.
                 cur.execute(
-                    "SELECT id FROM users WHERE display_name = %s",
+                    "SELECT id FROM users WHERE username = %s",
                     (profiles[name].username,),
                 )
                 existing = cur.fetchone()
@@ -159,7 +159,7 @@ def seed(
                     user_ids[name] = str(existing[0])
                     continue
                 cur.execute(
-                    "INSERT INTO users (display_name) VALUES (%s) RETURNING id",
+                    "INSERT INTO users (username) VALUES (%s) RETURNING id",
                     (profiles[name].username,),
                 )
                 new_id = cur.fetchone()[0]
