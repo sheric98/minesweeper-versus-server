@@ -30,6 +30,41 @@ def get_my_elo():
         conn.close()
 
 
+@elo_bp.route("/elo/player", methods=["GET"])
+def get_player_elo():
+    if not DATABASE_URL:
+        return jsonify({"error": "Database not configured"}), 503
+
+    username = request.args.get("username", "", type=str).strip()
+    if not username:
+        return jsonify({"error": "Missing username"}), 400
+
+    from db import get_conn
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT u.username, e.rating, e.wins, e.losses
+                FROM users u
+                LEFT JOIN elo_ratings e ON e.user_id = u.id
+                WHERE u.username = %s
+                """,
+                (username,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "User not found"}), 404
+            return jsonify({
+                "username": row[0],
+                "rating": row[1] if row[1] is not None else DEFAULT_RATING,
+                "wins": row[2] if row[2] is not None else 0,
+                "losses": row[3] if row[3] is not None else 0,
+            })
+    finally:
+        conn.close()
+
+
 @elo_bp.route("/elo/leaderboard", methods=["GET"])
 def get_elo_leaderboard():
     if not DATABASE_URL:

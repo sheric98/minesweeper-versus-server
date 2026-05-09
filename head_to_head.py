@@ -14,18 +14,28 @@ def get_head_to_head():
     if g.auth_level != "google" or not g.user_id:
         return jsonify({"error": "Google authentication required"}), 403
 
+    target_username = request.args.get("username", "", type=str).strip()
     opponent_name = request.args.get("opponent")
     from db import get_conn
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            if target_username:
+                cur.execute("SELECT id FROM users WHERE username = %s", (target_username,))
+                row = cur.fetchone()
+                if not row:
+                    return jsonify({"error": "User not found"}), 404
+                target_user_id = str(row[0])
+            else:
+                target_user_id = g.user_id
+
             if opponent_name:
-                return _get_single_record(cur, g.user_id, opponent_name)
+                return _get_single_record(cur, target_user_id, opponent_name)
             else:
                 page = max(1, request.args.get("page", 1, type=int))
                 page_size = max(1, min(request.args.get("page_size", 10, type=int), 50))
                 search = request.args.get("search", "", type=str).strip()
-                return _get_all_records(cur, g.user_id, page, page_size, search)
+                return _get_all_records(cur, target_user_id, page, page_size, search)
     finally:
         conn.close()
 
