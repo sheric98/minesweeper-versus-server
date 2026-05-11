@@ -24,6 +24,7 @@ def create_app():
     from board_endpoint import board_bp
     from elo_endpoints import elo_bp
     from matchmaking_queue import queue_bp
+    from preferences import preferences_bp
     from websocket_handler import sock
 
     app.register_blueprint(auth_bp)
@@ -34,6 +35,7 @@ def create_app():
     app.register_blueprint(board_bp)
     app.register_blueprint(elo_bp)
     app.register_blueprint(queue_bp)
+    app.register_blueprint(preferences_bp)
     sock.init_app(app)
 
     if DATABASE_URL:

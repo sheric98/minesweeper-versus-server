@@ -110,6 +110,12 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_board_cache_lookup
                     ON board_cache (difficulty, start_row, start_col);
+
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id UUID PRIMARY KEY REFERENCES users(id),
+                    controls JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
             """)
         conn.commit()
     finally:
