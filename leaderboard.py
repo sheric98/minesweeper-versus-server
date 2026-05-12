@@ -1,6 +1,5 @@
-from flask import Blueprint, jsonify, request, g
+from flask import Blueprint, jsonify, request
 
-from auth import require_auth
 from config import DATABASE_URL
 
 leaderboard_bp = Blueprint("leaderboard", __name__)
@@ -59,42 +58,3 @@ def get_leaderboard():
     finally:
         conn.close()
 
-
-@leaderboard_bp.route("/leaderboard", methods=["POST"])
-@require_auth
-def post_score():
-    if not DATABASE_URL:
-        return jsonify({"error": "Database not configured"}), 503
-
-    if g.auth_level != "google":
-        return jsonify({"error": "Google authentication required"}), 403
-
-    body = request.get_json(silent=True) or {}
-    time_seconds = body.get("time_seconds")
-
-    if not isinstance(time_seconds, int) or time_seconds < 1 or time_seconds > 999:
-        return jsonify({"error": "time_seconds must be an integer between 1 and 999"}), 400
-
-    mode = body.get("mode", "random")
-    if mode not in ("random", "no-guess"):
-        mode = "random"
-
-    valid_difficulties = ("beginner", "intermediate", "advanced", "expert")
-    difficulty = None
-    if mode == "no-guess":
-        difficulty = body.get("difficulty")
-        if difficulty not in valid_difficulties:
-            return jsonify({"error": "difficulty must be one of: beginner, intermediate, advanced, expert"}), 400
-
-    from db import get_conn
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO leaderboard_scores (user_id, time_seconds, mode, difficulty) VALUES (%s, %s, %s, %s)",
-                (g.user_id, time_seconds, mode, difficulty)
-            )
-        conn.commit()
-        return jsonify({"success": True})
-    finally:
-        conn.close()
