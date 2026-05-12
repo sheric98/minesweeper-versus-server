@@ -116,7 +116,62 @@ def init_db():
                     controls JSONB NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+
+                CREATE TABLE IF NOT EXISTS recent_singleplayer_games (
+                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id         UUID NOT NULL REFERENCES users(id),
+                    mode            VARCHAR(10) NOT NULL,
+                    difficulty      VARCHAR(15) NOT NULL,
+                    result          VARCHAR(8) NOT NULL,
+                    time_seconds    INTEGER,
+                    client_game_id  UUID NOT NULL,
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    CONSTRAINT recent_sp_games_unique_client UNIQUE (user_id, client_game_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_recent_sp_games_lookup
+                    ON recent_singleplayer_games (user_id, mode, difficulty, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS user_singleplayer_stats (
+                    user_id              UUID NOT NULL REFERENCES users(id),
+                    mode                 VARCHAR(10) NOT NULL,
+                    difficulty           VARCHAR(15) NOT NULL,
+                    total_wins           INTEGER NOT NULL DEFAULT 0,
+                    fastest_win_seconds  INTEGER,
+                    PRIMARY KEY (user_id, mode, difficulty)
+                );
             """)
+
+            # One-time backfill: seed user_singleplayer_stats and trim leaderboard_scores
+            # to its new bounded shape. Guarded so it only runs once.
+            cur.execute("SELECT 1 FROM user_singleplayer_stats LIMIT 1")
+            if cur.fetchone() is None:
+                cur.execute("""
+                    INSERT INTO user_singleplayer_stats (user_id, mode, difficulty, total_wins, fastest_win_seconds)
+                    SELECT user_id,
+                           mode,
+                           COALESCE(difficulty, 'standard'),
+                           count(*),
+                           min(time_seconds)
+                    FROM leaderboard_scores
+                    GROUP BY user_id, mode, COALESCE(difficulty, 'standard');
+                """)
+
+                cur.execute("""
+                    DELETE FROM leaderboard_scores
+                    WHERE id NOT IN (
+                        SELECT id FROM (
+                            SELECT id, row_number() OVER (
+                                PARTITION BY mode, COALESCE(difficulty, 'standard')
+                                ORDER BY time_seconds ASC
+                            ) AS rn
+                            FROM leaderboard_scores
+                        ) ranked WHERE rn <= 10
+                    );
+                """)
+
+                cur.execute("UPDATE leaderboard_scores SET difficulty = 'standard' WHERE difficulty IS NULL;")
+                cur.execute("ALTER TABLE leaderboard_scores ALTER COLUMN difficulty SET NOT NULL;")
+
         conn.commit()
     finally:
         conn.close()
