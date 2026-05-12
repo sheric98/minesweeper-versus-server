@@ -43,7 +43,7 @@ def parse_game_submission(body):
 
     time_seconds = body.get("time_seconds")
     if result == "win":
-        if not isinstance(time_seconds, int) or time_seconds < 1 or time_seconds > 999:
+        if isinstance(time_seconds, bool) or not isinstance(time_seconds, int) or time_seconds < 1 or time_seconds > 999:
             return None, "time_seconds must be an integer 1-999 for a win"
     else:
         # Loss — drop any time the client may have sent.

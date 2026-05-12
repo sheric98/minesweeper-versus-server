@@ -155,3 +155,17 @@ def test_loss_time_seconds_coerced_to_none():
     parsed, err = parse_game_submission(body)
     assert err is None
     assert parsed["time_seconds"] is None
+
+
+def test_bool_time_seconds_rejected():
+    """`True` happens to satisfy isinstance(int) and equals 1, so the validator
+    must explicitly reject booleans to avoid accepting malformed JSON payloads."""
+    body = {
+        "mode": "random",
+        "difficulty": "standard",
+        "result": "win",
+        "time_seconds": True,
+        "client_game_id": _valid_uuid(),
+    }
+    _, err = parse_game_submission(body)
+    assert err is not None
