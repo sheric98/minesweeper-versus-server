@@ -148,7 +148,10 @@ def post_game():
                 # Step 4: maybe-insert into the bounded global leaderboard.
                 # SELECT FOR UPDATE locks existing rows for this category to
                 # serialize concurrent winners and prevent the table from
-                # growing past 10 entries per category.
+                # growing past 10 entries per category. Caveat: when the
+                # table is empty for a category, FOR UPDATE locks nothing,
+                # so the first ~10 concurrent winners may briefly produce
+                # >10 rows. Self-corrects on the next winning submission.
                 cur.execute(
                     """
                     SELECT id, time_seconds FROM leaderboard_scores
@@ -159,6 +162,7 @@ def post_game():
                     (parsed["mode"], parsed["difficulty"]),
                 )
                 rows = cur.fetchall()
+                # Strict <: a tying time does NOT displace the current 10th-place holder.
                 qualifies = len(rows) < 10 or parsed["time_seconds"] < rows[-1][1]
                 if qualifies:
                     cur.execute(
