@@ -183,3 +183,93 @@ def post_game():
         return jsonify({"success": True})
     finally:
         conn.close()
+
+
+ALL_CATEGORIES = (
+    ("random", "standard"),
+    ("no-guess", "beginner"),
+    ("no-guess", "intermediate"),
+    ("no-guess", "advanced"),
+    ("no-guess", "expert"),
+)
+
+
+@singleplayer_bp.route("/singleplayer/stats/me", methods=["GET"])
+@require_auth
+def get_my_stats():
+    if not DATABASE_URL:
+        # Mock mode — return empty stats for every category.
+        categories = [
+            {
+                "mode": m,
+                "difficulty": d,
+                "total_wins": 0,
+                "fastest_win_seconds": None,
+                "recent_count": 0,
+                "recent_wins": 0,
+                "recent_avg_win_seconds": None,
+            }
+            for (m, d) in ALL_CATEGORIES
+        ]
+        return jsonify({"categories": categories})
+
+    if g.auth_level != "google":
+        return jsonify({"error": "Google authentication required"}), 403
+
+    from db import get_conn
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Lifetime stats: LEFT JOIN against a fixed inline category list
+            # so every category gets a row even if the user has never played it.
+            cur.execute(
+                """
+                WITH all_categories(mode, difficulty) AS (
+                    VALUES ('random', 'standard'),
+                           ('no-guess', 'beginner'),
+                           ('no-guess', 'intermediate'),
+                           ('no-guess', 'advanced'),
+                           ('no-guess', 'expert')
+                )
+                SELECT c.mode, c.difficulty,
+                       COALESCE(s.total_wins, 0),
+                       s.fastest_win_seconds
+                FROM all_categories c
+                LEFT JOIN user_singleplayer_stats s
+                  ON s.user_id = %s AND s.mode = c.mode AND s.difficulty = c.difficulty
+                """,
+                (g.user_id,),
+            )
+            lifetime_rows = {(r[0], r[1]): (r[2], r[3]) for r in cur.fetchall()}
+
+            # Window aggregates (one row per category the user has any games in).
+            cur.execute(
+                """
+                SELECT mode, difficulty,
+                       count(*) AS recent_count,
+                       count(*) FILTER (WHERE result = 'win') AS recent_wins,
+                       avg(time_seconds) FILTER (WHERE result = 'win') AS recent_avg
+                FROM recent_singleplayer_games
+                WHERE user_id = %s
+                GROUP BY mode, difficulty
+                """,
+                (g.user_id,),
+            )
+            window_rows = {(r[0], r[1]): (r[2], r[3], r[4]) for r in cur.fetchall()}
+
+        categories = []
+        for (m, d) in ALL_CATEGORIES:
+            total_wins, fastest = lifetime_rows.get((m, d), (0, None))
+            recent_count, recent_wins, recent_avg = window_rows.get((m, d), (0, 0, None))
+            categories.append({
+                "mode": m,
+                "difficulty": d,
+                "total_wins": int(total_wins),
+                "fastest_win_seconds": int(fastest) if fastest is not None else None,
+                "recent_count": int(recent_count),
+                "recent_wins": int(recent_wins),
+                "recent_avg_win_seconds": round(float(recent_avg)) if recent_avg is not None else None,
+            })
+        return jsonify({"categories": categories})
+    finally:
+        conn.close()
