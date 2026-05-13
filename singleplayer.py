@@ -280,3 +280,44 @@ def get_my_stats():
         return jsonify({"categories": categories})
     finally:
         conn.close()
+
+
+@singleplayer_bp.route("/singleplayer/stats/player", methods=["GET"])
+def get_player_stats():
+    if not DATABASE_URL:
+        # Mock mode — return empty stats for every category, ignoring the username.
+        # Matches /singleplayer/stats/me's mock behavior so the table renders in local dev.
+        categories = [
+            {
+                "mode": m,
+                "difficulty": d,
+                "total_wins": 0,
+                "fastest_win_seconds": None,
+                "recent_count": 0,
+                "recent_wins": 0,
+                "recent_avg_win_seconds": None,
+            }
+            for (m, d) in ALL_CATEGORIES
+        ]
+        return jsonify({"categories": categories})
+
+    username = request.args.get("username", "", type=str).strip()
+    if not username:
+        return jsonify({"error": "Missing username"}), 400
+
+    from db import get_conn
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM users WHERE username = %s",
+                (username,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "User not found"}), 404
+            user_id = row[0]
+            categories = _compute_stats_for_user(cur, user_id)
+        return jsonify({"categories": categories})
+    finally:
+        conn.close()
