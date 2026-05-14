@@ -89,6 +89,12 @@ invite_store = InviteStore()
 def get_players():
     players = tracker.get_active_players(exclude=g.username)
 
+    # Flag bots so the client can render a [BOT] tag next to their names.
+    from bots.registry import bot_registry
+    for p in players:
+        if bot_registry.is_bot(p["username"]):
+            p["isBot"] = True
+
     # Enrich with ELO ratings so every player shows their rating
     from config import DATABASE_URL
     if DATABASE_URL and players:

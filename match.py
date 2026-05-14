@@ -52,12 +52,14 @@ class Match:
         encoded = encode_board(self.board, self.match_id)
 
         # Send match_found to both
+        from bots.registry import bot_registry
         for username, ws in self.connections.items():
             opponent = self.player2 if username == self.player1 else self.player1
             self._send(ws, {
                 "type": "match_found",
                 "matchId": self.match_id,
                 "opponent": opponent,
+                "opponentIsBot": bot_registry.is_bot(opponent),
                 "startingSquare": list(self.starting_square),
             })
 
