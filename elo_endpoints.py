@@ -73,6 +73,9 @@ def get_elo_leaderboard():
     limit = max(1, min(request.args.get("limit", 20, type=int), 100))
 
     from db import get_conn
+    from bots.registry import bot_registry
+
+    bot_ids = bot_registry.bot_user_ids()
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -81,10 +84,11 @@ def get_elo_leaderboard():
                 SELECT u.username, e.rating, e.wins, e.losses
                 FROM elo_ratings e
                 JOIN users u ON u.id = e.user_id
+                WHERE u.id <> ALL(%s::uuid[])
                 ORDER BY e.rating DESC
                 LIMIT %s
                 """,
-                (limit,),
+                (bot_ids, limit),
             )
             players = [
                 {"username": r[0], "rating": r[1], "wins": r[2], "losses": r[3]}

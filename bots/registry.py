@@ -109,6 +109,11 @@ class BotRegistry:
             return False
         return username in self._by_username
 
+    def bot_user_ids(self) -> list[str]:
+        if not self._loaded:
+            return []
+        return [b.user_id for b in self._by_username.values()]
+
     def get(self, username: str) -> BotEntry | None:
         self._require_loaded()
         return self._by_username.get(username)
