@@ -71,6 +71,8 @@ def _get_single_record(cur, user_id, opponent_name):
 
 
 def _get_all_records(cur, user_id, page, page_size, search):
+    from bots.registry import bot_registry
+
     base_query = """
         FROM head_to_head_records h
         JOIN users u1 ON u1.id = h.player1_id
@@ -99,7 +101,13 @@ def _get_all_records(cur, user_id, page, page_size, search):
     """, [user_id, user_id, user_id] + params + [page_size, offset])
 
     records = [
-        {"opponent": row[0], "wins": row[1], "losses": row[2], "total_games": row[3]}
+        {
+            "opponent": row[0],
+            "wins": row[1],
+            "losses": row[2],
+            "total_games": row[3],
+            "isBot": bot_registry.is_bot(row[0]),
+        }
         for row in cur.fetchall()
     ]
     return jsonify({

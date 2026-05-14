@@ -40,6 +40,7 @@ def get_player_elo():
         return jsonify({"error": "Missing username"}), 400
 
     from db import get_conn
+    from bots.registry import bot_registry
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -60,6 +61,7 @@ def get_player_elo():
                 "rating": row[1] if row[1] is not None else DEFAULT_RATING,
                 "wins": row[2] if row[2] is not None else 0,
                 "losses": row[3] if row[3] is not None else 0,
+                "isBot": bot_registry.is_bot(row[0]),
             })
     finally:
         conn.close()
