@@ -10,6 +10,7 @@ from flask import Blueprint, g, jsonify, request
 
 from auth import require_auth
 from config import DATABASE_URL
+from rate_limit import limiter, user_or_ip
 
 singleplayer_bp = Blueprint("singleplayer", __name__)
 
@@ -70,6 +71,7 @@ def parse_game_submission(body):
 
 
 @singleplayer_bp.route("/singleplayer/games", methods=["POST"])
+@limiter.limit("30 per minute; 2000 per day", key_func=user_or_ip)
 @require_auth
 def post_game():
     if not DATABASE_URL:

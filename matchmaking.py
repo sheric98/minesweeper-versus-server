@@ -4,6 +4,7 @@ import threading
 from flask import Blueprint, jsonify, request, g
 
 from auth import require_auth
+from rate_limit import limiter, user_or_ip
 from session_tracker import tracker
 
 matchmaking_bp = Blueprint("matchmaking", __name__)
@@ -123,6 +124,7 @@ def get_players():
 
 
 @matchmaking_bp.route("/matchmaking/invite", methods=["POST"])
+@limiter.limit("30 per minute", key_func=user_or_ip)
 @require_auth
 def send_invite():
     body = request.get_json(silent=True) or {}

@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 from config import CORS_ORIGINS, DATABASE_URL
 
@@ -11,6 +11,13 @@ from config import CORS_ORIGINS, DATABASE_URL
 def create_app():
     app = Flask(__name__)
     CORS(app, origins=CORS_ORIGINS)
+
+    from rate_limit import limiter
+    limiter.init_app(app)
+
+    @app.errorhandler(429)
+    def rate_limited(e):
+        return jsonify({"error": "Too many requests", "detail": str(e.description)}), 429
 
     if DATABASE_URL:
         from db import init_db

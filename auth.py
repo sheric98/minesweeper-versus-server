@@ -7,6 +7,7 @@ import jwt
 from flask import Blueprint, request, jsonify, g
 
 from config import JWT_SECRET, JWT_ALGORITHM, DATABASE_URL
+from rate_limit import limiter
 from session_tracker import tracker
 
 auth_bp = Blueprint("auth", __name__)
@@ -66,6 +67,7 @@ def require_auth(f):
 
 
 @auth_bp.route("/auth/register", methods=["POST"])
+@limiter.limit("10 per minute; 60 per hour")
 def register():
     body = request.get_json(silent=True) or {}
     username = body.get("username", "")
@@ -95,6 +97,7 @@ def register():
 
 
 @auth_bp.route("/auth/google", methods=["POST"])
+@limiter.limit("10 per minute; 60 per hour")
 def google_auth():
     body = request.get_json(silent=True) or {}
     google_id = body.get("google_id", "")
@@ -148,6 +151,7 @@ def google_auth():
 
 
 @auth_bp.route("/auth/google/complete", methods=["POST"])
+@limiter.limit("10 per minute; 60 per hour")
 def google_auth_complete():
     body = request.get_json(silent=True) or {}
     pending_token = body.get("pending_token", "")

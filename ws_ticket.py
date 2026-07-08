@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, g
 
 from auth import require_auth
 from config import TICKET_EXPIRY_SECONDS
+from rate_limit import limiter, user_or_ip
 
 ws_ticket_bp = Blueprint("ws_ticket", __name__)
 
@@ -49,6 +50,7 @@ ticket_store = TicketStore()
 
 
 @ws_ticket_bp.route("/ws/ticket", methods=["POST"])
+@limiter.limit("30 per minute", key_func=user_or_ip)
 @require_auth
 def create_ticket():
     ticket = ticket_store.create(g.username, user_id=g.user_id)

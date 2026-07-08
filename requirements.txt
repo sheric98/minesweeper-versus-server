@@ -1,6 +1,7 @@
 flask>=3.0
 flask-sock>=0.7
 flask-cors>=4.0
+flask-limiter>=3.5
 PyJWT>=2.8
 gunicorn>=22.0
 python-dotenv>=1.0
