@@ -1,7 +1,14 @@
 import os
 import secrets
 
-JWT_SECRET = os.environ.get("JWT_SECRET", secrets.token_hex(32))
+JWT_SECRET = os.environ.get("JWT_SECRET")
+if not JWT_SECRET:
+    if os.environ.get("DATABASE_URL"):
+        # Production (any DB-backed deployment): a random per-process secret
+        # would log every user out on each restart. Refuse to start.
+        raise RuntimeError("JWT_SECRET must be set when DATABASE_URL is configured")
+    # Mock/local mode: ephemeral secret is fine.
+    JWT_SECRET = secrets.token_hex(32)
 JWT_ALGORITHM = "HS256"
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
 
