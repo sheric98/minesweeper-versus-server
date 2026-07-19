@@ -139,6 +139,11 @@ def init_db():
                     fastest_win_seconds  INTEGER,
                     PRIMARY KEY (user_id, mode, difficulty)
                 );
+
+                CREATE TABLE IF NOT EXISTS singleplayer_game_starts (
+                    client_game_id  UUID PRIMARY KEY,
+                    started_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
             """)
 
             # One-time backfill: seed user_singleplayer_stats and trim leaderboard_scores

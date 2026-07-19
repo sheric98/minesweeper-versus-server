@@ -10,11 +10,24 @@ from flask import Blueprint, g, jsonify, request
 
 from auth import require_auth
 from config import DATABASE_URL
-from rate_limit import limiter, user_or_ip
+from rate_limit import client_ip, limiter, user_or_ip
 
 singleplayer_bp = Blueprint("singleplayer", __name__)
 
 VALID_MODES = ("random", "no-guess")
+
+# Claimed win times qualify for the leaderboard only when the server saw at
+# least that much wall-clock time pass since the game's start ping. 5s of
+# tolerance covers latency and timer rounding. This doesn't stop a patient
+# forger (they can wait out the claimed time), but it kills instant/bulk forgery.
+WIN_TIME_TOLERANCE_SECONDS = 5
+
+
+def win_time_is_plausible(time_seconds, started_at, now):
+    if started_at is None:
+        return False
+    elapsed = (now - started_at).total_seconds()
+    return time_seconds <= elapsed + WIN_TIME_TOLERANCE_SECONDS
 VALID_NO_GUESS_DIFFICULTIES = ("beginner", "intermediate", "advanced", "expert")
 VALID_RESULTS = ("win", "loss")
 
@@ -68,6 +81,44 @@ def parse_game_submission(body):
         "time_seconds": time_seconds,
         "client_game_id": client_game_id,
     }, None
+
+
+@singleplayer_bp.route("/singleplayer/games/start", methods=["POST"])
+@limiter.limit("30 per minute; 500 per day", key_func=client_ip)
+def post_game_start():
+    """Record that a game began. Unauthenticated: anonymous players may sign
+    in after winning (pending-score flow), so the start must predate auth."""
+    if not DATABASE_URL:
+        return jsonify({"success": True})
+
+    body = request.get_json(silent=True)
+    raw = body.get("client_game_id") if isinstance(body, dict) else None
+    if not isinstance(raw, str):
+        return jsonify({"error": "client_game_id must be a string"}), 400
+    try:
+        client_game_id = str(uuid.UUID(raw))
+    except (ValueError, AttributeError):
+        return jsonify({"error": "client_game_id must be a UUID"}), 400
+
+    from db import get_conn
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Opportunistic cleanup: max game is 999s, keep 2h of slack.
+            cur.execute(
+                "DELETE FROM singleplayer_game_starts WHERE started_at < now() - interval '2 hours'"
+            )
+            cur.execute(
+                """
+                INSERT INTO singleplayer_game_starts (client_game_id)
+                VALUES (%s) ON CONFLICT DO NOTHING
+                """,
+                (client_game_id,),
+            )
+        conn.commit()
+        return jsonify({"success": True})
+    finally:
+        conn.close()
 
 
 @singleplayer_bp.route("/singleplayer/games", methods=["POST"])
@@ -147,6 +198,17 @@ def post_game():
                     (g.user_id, parsed["mode"], parsed["difficulty"], parsed["time_seconds"]),
                 )
 
+                # Leaderboard integrity: only plausible times qualify (steps 1-3
+                # above are unaffected so a lost start-ping never drops a legit game).
+                cur.execute(
+                    "SELECT started_at, now() FROM singleplayer_game_starts WHERE client_game_id = %s",
+                    (parsed["client_game_id"],),
+                )
+                start_row = cur.fetchone()
+                plausible = start_row is not None and win_time_is_plausible(
+                    parsed["time_seconds"], start_row[0], start_row[1]
+                )
+
                 # Step 4: maybe-insert into the bounded global leaderboard.
                 # SELECT FOR UPDATE locks existing rows for this category to
                 # serialize concurrent winners and prevent the table from
@@ -165,7 +227,7 @@ def post_game():
                 )
                 rows = cur.fetchall()
                 # Strict <: a tying time does NOT displace the current 10th-place holder.
-                qualifies = len(rows) < 10 or parsed["time_seconds"] < rows[-1][1]
+                qualifies = plausible and (len(rows) < 10 or parsed["time_seconds"] < rows[-1][1])
                 if qualifies:
                     cur.execute(
                         """

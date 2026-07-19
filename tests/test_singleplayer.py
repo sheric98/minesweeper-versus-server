@@ -169,3 +169,35 @@ def test_bool_time_seconds_rejected():
     }
     _, err = parse_game_submission(body)
     assert err is not None
+
+
+# ---- win_time_is_plausible ----
+
+from datetime import datetime, timedelta, timezone
+
+from singleplayer import win_time_is_plausible
+
+
+def _t(seconds_ago):
+    now = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
+    return now - timedelta(seconds=seconds_ago), now
+
+
+def test_plausible_when_elapsed_matches_claim():
+    started_at, now = _t(60)
+    assert win_time_is_plausible(60, started_at, now) is True
+
+
+def test_plausible_within_tolerance():
+    started_at, now = _t(57)  # claim 60s after 57s elapsed: within 5s tolerance
+    assert win_time_is_plausible(60, started_at, now) is True
+
+
+def test_implausible_when_claim_exceeds_elapsed():
+    started_at, now = _t(10)
+    assert win_time_is_plausible(60, started_at, now) is False
+
+
+def test_implausible_without_start_record():
+    _, now = _t(60)
+    assert win_time_is_plausible(60, None, now) is False
