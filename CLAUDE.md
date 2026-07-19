@@ -73,7 +73,7 @@ DATABASE_URL="" ./venv/bin/python -m pytest tests/ -q
 | `elo.py` / `elo_endpoints.py` | ELO math + `/elo/{me,player,leaderboard}` |
 | `leaderboard.py` | `GET /leaderboard` — multiplayer win-time leaderboard |
 | `head_to_head.py` | `GET /head-to-head` — per-opponent W/L records |
-| `singleplayer.py` | `POST /singleplayer/games`, `/singleplayer/stats/{me,player}` — single-player stats |
+| `singleplayer.py` | `POST /singleplayer/games{,/start}`, `/singleplayer/stats/{me,player}` — single-player stats + win-time plausibility gate |
 | `preferences.py` | `GET/PUT /preferences/controls` — server-synced control settings |
 | `bots/` | Bot opponents: profiles, brain, lifecycle, queue injector, ELO seeding/calibration |
 
@@ -89,6 +89,7 @@ All authenticated endpoints expect `Authorization: Bearer <JWT>`.
 - `GET /matchmaking/players` / `POST /matchmaking/invite` / `GET /matchmaking/invite` / `POST /matchmaking/respond`
 - `POST /matchmaking/queue/join` / `POST /matchmaking/queue/leave` / `GET /matchmaking/queue/status`
 - `GET /leaderboard`, `GET /elo/me`, `GET /elo/player`, `GET /elo/leaderboard`, `GET /head-to-head`
+- `POST /singleplayer/games/start` — unauthenticated game-start ping `{ "client_game_id" }`; win times only reach the leaderboard when server-observed elapsed time covers them
 - `POST /singleplayer/games`, `GET /singleplayer/stats/me`, `GET /singleplayer/stats/player`
 - `GET /preferences/controls` / `PUT /preferences/controls`
 
@@ -105,8 +106,9 @@ username. Returns JSON 429s. Disable locally with `RATE_LIMIT_ENABLED=0`.
 
 ## Environment Variables
 
-- `JWT_SECRET` — signing key (**must be set in prod**; random per-process if
-  unset, which invalidates all sessions on restart)
+- `JWT_SECRET` — signing key. **Startup fails if unset while `DATABASE_URL`
+  is set** (a random per-process secret would invalidate all sessions on
+  restart); mock mode generates an ephemeral one.
 - `CORS_ORIGINS` — comma-separated allowed origins (default: `http://localhost:3000`)
 - `DATABASE_URL` — Postgres DSN; unset = in-memory mock mode
 - `POSTGRES_PASSWORD` — used by docker-compose for the `db` service
